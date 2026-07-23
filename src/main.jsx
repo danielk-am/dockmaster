@@ -1,5 +1,6 @@
 import { createRoot } from 'react-dom/client';
 import '@wordpress/components/build-style/style.css';
+import '@wordpress/dataviews/build-style/style.css';
 import './style.css';
 import App from './App.jsx';
 

@@ -52,15 +52,17 @@
 }
 
 * { box-sizing: border-box; }
+html, body, #root { height: 100%; margin: 0; }
 body {
-	margin: 0;
 	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 	font-size: 14px;
 	color: var(--ps-text);
 	background: var(--ps-canvas);
 }
 
-.ps-app { display: flex; min-height: 100vh; }
+/* Fixed-height shell (the Snippet Manager gold standard): the sidebar is a
+   full-height column that never scrolls away; the CONTENT pane scrolls. */
+.ps-app { display: flex; height: 100%; overflow: hidden; }
 
 /* Sidebar shell (composing-app-shells: brand / nav / footer) — white like
    the Snippet Manager, bordered, accent active row. */
@@ -69,6 +71,7 @@ body {
 	flex-shrink: 0;
 	display: flex;
 	flex-direction: column;
+	min-height: 0;
 	background: var(--ps-surface);
 	border-right: 1px solid var(--ps-border);
 }
@@ -76,11 +79,11 @@ body {
 .ps-brand__mark { font-size: 22px; }
 .ps-brand strong { display: block; font-size: 15px; color: var(--ps-text); }
 .ps-brand__sub { font-size: 11px; color: var(--ps-muted); }
-.ps-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; flex: 1; }
+.ps-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; flex: 1; overflow-y: auto; min-height: 0; }
 .ps-nav button {
 	appearance: none; border: 0; background: none; color: var(--ps-text);
-	text-align: left; padding: 10px 12px; border-radius: 6px; font-size: 13px;
-	cursor: pointer; min-height: 40px;
+	text-align: left; padding: 8px 10px; border-radius: 2px; font: inherit; font-size: 13px;
+	cursor: pointer; min-height: 36px;
 }
 .ps-nav button:hover { background: var(--ps-hover); }
 .ps-nav button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
@@ -104,7 +107,7 @@ body {
 .ps-themeswitch button:hover { background: var(--ps-hover); color: var(--ps-text); }
 .ps-themeswitch button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
 
-.ps-main { flex: 1; min-width: 0; padding: 28px 32px; background: var(--ps-canvas); }
+.ps-main { flex: 1; min-width: 0; padding: 28px 32px 48px; background: var(--ps-canvas); overflow-y: auto; min-height: 0; }
 
 .ps-section { max-width: 1040px; }
 .ps-section__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
@@ -189,3 +192,24 @@ body {
 .ps-emptycell { color: var(--ps-muted); text-align: center; padding: 24px !important; }
 .ps-table a { color: var(--ps-accent); text-decoration: none; }
 .ps-table a:hover { text-decoration: underline; }
+
+/* Privileged-step callouts: numbered steps + a copyable command field. */
+.ps-sudosteps__intro { margin: 0 0 8px; font-weight: 600; }
+.ps-sudosteps ol { margin: 0 0 12px; padding-left: 20px; }
+.ps-sudosteps li { margin-bottom: 2px; }
+.ps-sudosteps__cmd { display: flex; gap: 8px; align-items: center; }
+.ps-sudosteps__cmd code {
+	flex: 1; min-width: 0; overflow-x: auto; white-space: nowrap;
+	padding: 10px 12px; border: 1px solid var(--ps-border); border-radius: 4px;
+	background: var(--ps-surface); font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
+}
+
+/* DataViews everywhere: breathing room after every view (Daniel's spacing
+   rule — tables/views always get space below). */
+.ps-dataviews { margin-bottom: 24px; border: 1px solid var(--ps-border); border-radius: 8px; background: var(--ps-surface); }
+.ps-dataviews .dataviews-wrapper { border-radius: 8px; }
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table th { color: var(--ps-muted); }
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table td,
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table th {
+	border-color: var(--ps-hairline);
+}

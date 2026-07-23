@@ -357,6 +357,32 @@ app.get('/api/launchd/:label/log', async (req, res) => {
 
 app.get('/api/dns', async (_req, res) => res.json(await dnsChain()));
 
+// Port management: SIGTERM a listener you own. Root/system processes are
+// refused — those are sudo-in-a-terminal territory.
+app.post('/api/ports/kill', async (req, res) => {
+  const pid = Number(req.body?.pid);
+  if (!Number.isInteger(pid) || pid <= 1) return res.status(400).json({ error: 'Bad pid.' });
+  const { stdout } = await run('ps', ['-o', 'uid=,comm=', '-p', String(pid)]);
+  const m = stdout.trim().match(/^(\d+)\s+(.*)$/);
+  if (!m) return res.status(404).json({ error: 'Process not found.' });
+  if (Number(m[1]) !== process.getuid()) return res.status(403).json({ error: 'Not your process — root/system listeners need sudo in a terminal.' });
+  try {
+    process.kill(pid, 'SIGTERM');
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message) });
+  }
+});
+
+// Launchd plist viewer: the declared file, read-only.
+app.get('/api/launchd/:label/plist', async (req, res) => {
+  const jobs = await listLaunchd();
+  const job = jobs.find((j) => j.label === req.params.label);
+  if (!job) return res.status(404).json({ error: 'Unknown label.' });
+  const r = await run('cat', [job.file]);
+  res.json({ path: job.file, lines: r.stdout.split('\n') });
+});
+
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')));
 

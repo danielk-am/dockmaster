@@ -1,9 +1,9 @@
 {
-  "name": "portside",
-  "version": "1.2.0",
+  "name": "harbormaster",
+  "version": "2.0.0",
   "private": true,
   "type": "module",
-  "description": "Local dev infrastructure dashboard — ports, domains, launchd services, DNS chain — in WordPress Design Language",
+  "description": "Harbormaster — local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -11,6 +11,7 @@
     "start": "npm run build && node server/index.mjs"
   },
   "dependencies": {
+    "@wordpress/dataviews": "^17.2.0",
     "express": "^4.21.2"
   },
   "devDependencies": {
