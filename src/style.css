@@ -74,8 +74,47 @@ body {
 	min-height: 0;
 	background: var(--ps-surface);
 	border-right: 1px solid var(--ps-border);
+	position: relative; /* the collapse chevron pins to this */
 }
-.ps-brand { display: flex; gap: 10px; align-items: center; padding: 20px 16px; }
+
+/* The collapsible rail (composing-app-shells #collapsible-rail): a visible 28px
+   chevron at the top of the sidebar, and — once collapsed — a floating reveal
+   button at the same y, so the way back is never hidden. House metrics, shared
+   with the Snippet Manager and UI Playground. */
+.ps-sidebar-collapse.components-button {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	z-index: 2;
+	width: 28px;
+	min-width: 28px;
+	height: 28px;
+	padding: 0;
+	justify-content: center;
+	border-radius: 6px;
+	color: var(--ps-muted);
+	opacity: 0.7;
+}
+.ps-sidebar-collapse.components-button:hover {
+	opacity: 1;
+	color: var(--ps-text);
+	background: var(--ps-hover);
+}
+.ps-app.is-sidebar-collapsed .ps-sidebar { display: none; }
+/* Clear the floating reveal button so the page heading never sits under it. */
+.ps-app.is-sidebar-collapsed .ps-main { padding-left: 56px; }
+.ps-sidebar-expand.components-button {
+	position: fixed;
+	top: 10px;
+	left: 10px;
+	z-index: 30;
+	background: var(--ps-surface);
+	border: 1px solid var(--ps-border);
+	border-radius: 2px;
+}
+
+/* Room for the chevron, so the brand never runs under it. */
+.ps-brand { display: flex; gap: 10px; align-items: center; padding: 20px 48px 20px 16px; }
 .ps-brand__mark { font-size: 22px; }
 .ps-brand strong { display: block; font-size: 15px; color: var(--ps-text); }
 .ps-brand__sub { font-size: 11px; color: var(--ps-muted); }
@@ -204,6 +243,11 @@ body {
 	.ps-nav { flex-direction: row; overflow-x: auto; }
 	.ps-sidebar__footer { display: none; }
 	.ps-main { padding: 16px; }
+	/* Narrow screens already stack the nav into a bar; collapsing it would leave
+	   no way to navigate, so the toggle stands down here. */
+	.ps-sidebar-collapse, .ps-sidebar-expand { display: none; }
+	.ps-app.is-sidebar-collapsed .ps-sidebar { display: flex; }
+	.ps-app.is-sidebar-collapsed .ps-main { padding: 16px; }
 }
 
 /* Ingress management: the add row and the fixed .test suffix field. */

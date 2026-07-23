@@ -3,8 +3,9 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
+import { chevronLeft, menu } from '@wordpress/icons';
 
-const VERSION = '2.3.0';
+const VERSION = '2.4.0';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -29,6 +30,13 @@ const useNotify = () => useContext(NotifyContext);
 // Light — the Snippet Manager's white approach — is the default.
 const THEME_KEY = 'dockmaster-theme';
 const THEMES = ['system', 'light', 'dark'];
+
+// Sidebar collapse (composing-app-shells #collapsible-rail): every house shell
+// carries a visible collapse toggle, and the choice persists. These nav rows are
+// labels with no icons, so collapsing hides the column outright and leaves the
+// floating reveal button at the same y position, rather than shrinking to an
+// icons-only rail that would have nothing to show.
+const SIDEBAR_KEY = 'dockmaster-sidebar-collapsed';
 
 function useTheme() {
   const [pref, setPref] = useState(() => {
@@ -952,6 +960,11 @@ export default function App() {
   const [themePref, setThemePref] = useTheme();
   const [notices, setNotices] = useState([]);
   const Page = { overview: Overview, ingress: Ingress, ports: Ports, services: Services, dns: Dns }[page];
+  const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
+  const setSidebarCollapsed = useCallback((v) => {
+    setSidebarCollapsedState(v);
+    localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0');
+  }, []);
   const dismiss = useCallback((id) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback((content, status = 'success') => {
     const id = String(++noticeId);
@@ -960,8 +973,18 @@ export default function App() {
   }, [dismiss]);
   return (
     <NotifyContext.Provider value={notify}>
-    <div className="ps-app">
+    <div className={`ps-app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
+      {sidebarCollapsed && (
+        <Button className="ps-sidebar-expand" icon={menu} label="Show sidebar" showTooltip onClick={() => setSidebarCollapsed(false)} />
+      )}
       <aside className="ps-sidebar">
+        <Button
+          className="ps-sidebar-collapse"
+          icon={chevronLeft}
+          label="Collapse sidebar"
+          showTooltip
+          onClick={() => setSidebarCollapsed(true)}
+        />
         <div className="ps-brand">
           <span className="ps-brand__mark">⚓</span>
           <div>

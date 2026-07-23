@@ -1,6 +1,6 @@
 {
   "name": "dockmaster",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "private": true,
   "type": "module",
   "description": "Dockmaster — local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
