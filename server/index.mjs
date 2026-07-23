@@ -5,10 +5,22 @@
 import express from 'express';
 import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  ALIAS_IP,
+  ALIAS_IP6,
+  CERTS,
+  MKCERT,
+  ensureDirs,
+  readRegistry,
+  refreshDnsPending,
+  regenerate,
+  writeRegistry,
+} from './ingress-lib.mjs';
 
 const PORT = Number(process.env.PORT || 4950);
 const HOME = homedir();
@@ -186,10 +198,98 @@ async function dnsChain() {
   return { scoped, defaultNameservers: resolvers.find((r) => !r.domain)?.nameservers || [], nextdns, dnsmasq };
 }
 
+// -------------------------------------------------------------- ingress ----
+// The management half (absorbed from Local Ingress): the domain registry in
+// ~/.local/share/local-ingress/ drives generated Caddy site blocks + mkcert
+// certs, all user-owned; the am.danielk.local-ingress root daemon runs
+// `caddy run --watch` over them, so registry changes apply with ZERO
+// privileges. Only new dnsmasq/hosts lines stay privileged — staged into
+// pending files, applied by deploy/apply-dns.sh.
+
+const tcpProbe = (host, port) =>
+  new Promise((resolve) => {
+    const sock = createConnection({ host, port, timeout: 1200 });
+    sock.once('connect', () => { sock.destroy(); resolve(true); });
+    sock.once('error', () => resolve(false));
+    sock.once('timeout', () => { sock.destroy(); resolve(false); });
+  });
+
+const ingressDnsState = async (host) => {
+  const r = await run('dscacheutil', ['-q', 'host', '-a', 'name', host]);
+  return r.stdout.includes(ALIAS_IP) ? 'ok' : 'pending';
+};
+
+async function ingressState() {
+  ensureDirs();
+  const reg = readRegistry();
+  const pending = refreshDnsPending();
+  const ingressUp = await tcpProbe(ALIAS_IP, 443);
+  const domains = await Promise.all(
+    reg.domains.map(async (d) => ({
+      ...d,
+      cert: existsSync(path.join(CERTS, `${d.host}.pem`)),
+      dns: await ingressDnsState(d.host),
+      upstream: (await tcpProbe('127.0.0.1', d.port)) ? 'up' : 'down',
+      url: `https://${d.host}`,
+    }))
+  );
+  return {
+    ingress: { up: ingressUp, aliasIp: ALIAS_IP, aliasIp6: ALIAS_IP6 },
+    dnsPending: pending,
+    applyDnsCommand: 'sudo bash ~/ai/repos/portside/deploy/apply-dns.sh',
+    installCommand: 'sudo bash ~/ai/repos/portside/deploy/install.sh',
+    domains,
+  };
+}
+
 // ------------------------------------------------------------------ app ----
 
 const app = express();
 app.use(express.json());
+
+app.get('/api/ingress', async (_req, res) => res.json(await ingressState()));
+
+app.post('/api/ingress/domains', async (req, res) => {
+  // The UI sends the bare NAME; .test is the fixed suffix (Daniel's nit —
+  // never type .test on every line). Full hosts are tolerated for the API.
+  const name = String(req.body?.name ?? req.body?.host ?? '').trim().toLowerCase().replace(/\.test$/, '');
+  const host = `${name}.test`;
+  const port = Number(req.body?.port);
+  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
+    return res.status(400).json({ error: 'Name must be letters/digits/hyphens (the .test suffix is automatic).' });
+  }
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
+  }
+  const reg = readRegistry();
+  if (reg.domains.some((d) => d.host === host)) {
+    return res.status(409).json({ error: `${host} is already registered.` });
+  }
+  const mk = await run(MKCERT, [
+    '-cert-file', path.join(CERTS, `${host}.pem`),
+    '-key-file', path.join(CERTS, `${host}-key.pem`),
+    host,
+  ]);
+  if (!mk.ok) return res.status(500).json({ error: `mkcert failed: ${mk.stderr.slice(0, 300)}` });
+  reg.domains.push({ host, port });
+  reg.domains.sort((a, b) => a.host.localeCompare(b.host));
+  writeRegistry(reg);
+  regenerate();
+  res.json({ ok: true, host });
+});
+
+app.delete('/api/ingress/domains/:host', (req, res) => {
+  const host = String(req.params.host).toLowerCase();
+  const reg = readRegistry();
+  if (!reg.domains.some((d) => d.host === host)) return res.status(404).json({ error: 'Not registered.' });
+  reg.domains = reg.domains.filter((d) => d.host !== host);
+  writeRegistry(reg);
+  for (const f of [`${host}.pem`, `${host}-key.pem`]) {
+    try { rmSync(path.join(CERTS, f)); } catch { /* already gone */ }
+  }
+  regenerate();
+  res.json({ ok: true });
+});
 
 app.get('/api/overview', async (_req, res) => {
   const [ports, launchd, dns] = await Promise.all([listPorts(), listLaunchd(), dnsChain()]);

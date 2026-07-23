@@ -165,3 +165,27 @@ body {
 	.ps-sidebar__footer { display: none; }
 	.ps-main { padding: 16px; }
 }
+
+/* Ingress management: the add row and the fixed .test suffix field. */
+.ps-addrow { display: flex; gap: 8px; align-items: center; margin: 20px 0; }
+.ps-suffixfield {
+	display: flex; align-items: center; height: 40px;
+	border: 1px solid var(--ps-input-border); border-radius: 2px; background: var(--ps-surface);
+	overflow: hidden;
+}
+.ps-suffixfield:focus-within { border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
+.ps-suffixfield input {
+	border: 0; outline: none; height: 100%; padding: 0 2px 0 12px; font-size: 13px;
+	min-width: 160px; background: transparent; color: var(--ps-text);
+	font-family: SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ps-suffixfield span {
+	padding: 0 12px 0 2px; color: var(--ps-muted); font-size: 13px;
+	font-family: SFMono-Regular, Menlo, Consolas, monospace;
+}
+.ps-portinput { min-width: 90px; width: 90px; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+.ps-command { cursor: pointer; font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.ps-command:hover { color: var(--ps-accent); }
+.ps-emptycell { color: var(--ps-muted); text-align: center; padding: 24px !important; }
+.ps-table a { color: var(--ps-accent); text-decoration: none; }
+.ps-table a:hover { text-decoration: underline; }

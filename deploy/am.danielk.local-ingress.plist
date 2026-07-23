@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>am.danielk.local-ingress</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/sh</string>
+		<string>-c</string>
+		<string>/sbin/ifconfig lo0 alias 127.0.49.49 255.255.255.255 2>/dev/null; /sbin/ifconfig lo0 inet6 alias fd49::4949 prefixlen 128 2>/dev/null; exec /opt/homebrew/bin/caddy run --config /Users/danielkam/.local/share/local-ingress/Caddyfile --watch</string>
+	</array>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>HOME</key>
+		<string>/var/root</string>
+	</dict>
+	<key>WorkingDirectory</key>
+	<string>/var/root</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>10</integer>
+	<key>StandardOutPath</key>
+	<string>/Library/Logs/am.danielk.local-ingress.log</string>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/am.danielk.local-ingress.log</string>
+</dict>
+</plist>

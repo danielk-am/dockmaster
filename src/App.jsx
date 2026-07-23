@@ -5,6 +5,7 @@ import { Button, Notice, Spinner, __experimentalText as Text } from '@wordpress/
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
+  { id: 'ingress', label: 'Ingress' },
   { id: 'ports', label: 'Ports' },
   { id: 'domains', label: 'Domains' },
   { id: 'services', label: 'Services' },
@@ -103,6 +104,119 @@ function Overview({ go }) {
           </button>
         ))}
       </div>
+    </Section>
+  );
+}
+
+// The management half (absorbed from Local Ingress): the registry drives
+// user-owned Caddy site blocks + mkcert certs; the root daemon's
+// caddy --watch applies changes live, so add/remove needs no sudo — only
+// new DNS/hosts lines stage for one privileged apply.
+function Ingress() {
+  const { data, error, reload } = useApi('ingress');
+  const [name, setName] = useState('');
+  const [port, setPort] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [confirmHost, setConfirmHost] = useState(null);
+  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (!data) return <Spinner />;
+  const add = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await fetch('/api/ingress/domains', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, port: Number(port) }),
+      }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
+      setNotice({ status: 'success', text: `${r.host} registered — live as soon as any staged DNS applies.` });
+      setName('');
+      setPort('');
+      reload();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (host) => {
+    setConfirmHost(null);
+    await fetch(`/api/ingress/domains/${encodeURIComponent(host)}`, { method: 'DELETE' });
+    reload();
+  };
+  return (
+    <Section
+      title="Ingress"
+      actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}
+    >
+      <div className="ps-dnsrow">
+        <Chip tone={data.ingress.up ? 'success' : 'error'}>
+          {data.ingress.up ? 'ingress daemon up' : 'ingress daemon down'}
+        </Chip>
+        <Chip>{data.ingress.aliasIp} + {data.ingress.aliasIp6}</Chip>
+      </div>
+      {!data.ingress.up && (
+        <Notice status="error" isDismissible={false}>
+          The root ingress daemon isn’t serving — run <code className="ps-command" onClick={() => navigator.clipboard.writeText(data.installCommand)} title="Click to copy">{data.installCommand}</code>
+        </Notice>
+      )}
+      {data.dnsPending.length > 0 && (
+        <Notice status="warning" isDismissible={false}>
+          {data.dnsPending.length} staged DNS/hosts line{data.dnsPending.length > 1 ? 's' : ''} need one privileged apply:{' '}
+          <code className="ps-command" onClick={() => navigator.clipboard.writeText(data.applyDnsCommand)} title="Click to copy">{data.applyDnsCommand}</code>
+        </Notice>
+      )}
+      {notice && <Notice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</Notice>}
+      <div className="ps-addrow">
+        <div className="ps-suffixfield">
+          <input
+            placeholder="myapp"
+            value={name}
+            onChange={(e) => setName(e.target.value.toLowerCase().replace(/\.test$/, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
+          />
+          <span>.test</span>
+        </div>
+        <input
+          className="ps-search ps-portinput"
+          placeholder="port"
+          inputMode="numeric"
+          value={port}
+          onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
+          onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
+        />
+        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!name || !port} onClick={add}>
+          Add domain
+        </Button>
+      </div>
+      <table className="ps-table">
+        <thead><tr><th>Domain</th><th>Upstream</th><th>Cert</th><th>DNS</th><th>Status</th><th className="ps-right"></th></tr></thead>
+        <tbody>
+          {data.domains.map((d) => (
+            <tr key={d.host}>
+              <td className="ps-mono"><a href={d.url} target="_blank" rel="noreferrer">{d.host}</a></td>
+              <td className="ps-mono">127.0.0.1:{d.port}</td>
+              <td>{d.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>}</td>
+              <td>{d.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>}</td>
+              <td>{d.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>}</td>
+              <td className="ps-right">
+                <Button size="small" variant="tertiary" isDestructive onClick={() => setConfirmHost(d.host)}>Remove</Button>
+              </td>
+            </tr>
+          ))}
+          {!data.domains.length && (
+            <tr><td colSpan={6} className="ps-emptycell">No domains yet — add one above; the daemon picks it up live.</td></tr>
+          )}
+        </tbody>
+      </table>
+      {confirmHost && (
+        <Notice status="warning" onRemove={() => setConfirmHost(null)}>
+          Remove {confirmHost} (site block + cert)?{' '}
+          <Button size="small" variant="primary" isDestructive onClick={() => remove(confirmHost)}>Remove it</Button>
+        </Notice>
+      )}
+      <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
     </Section>
   );
 }
@@ -261,14 +375,14 @@ function Dns() {
 export default function App() {
   const [page, setPage] = useState('overview');
   const [themePref, setThemePref] = useTheme();
-  const Page = { overview: Overview, ports: Ports, domains: Domains, services: Services, dns: Dns }[page];
+  const Page = { overview: Overview, ingress: Ingress, ports: Ports, domains: Domains, services: Services, dns: Dns }[page];
   return (
     <div className="ps-app">
       <aside className="ps-sidebar">
         <div className="ps-brand">
           <span className="ps-brand__mark">⚓</span>
           <div>
-            <strong>Portside</strong>
+            <strong>Local Portside</strong>
             <span className="ps-brand__sub">local dev infrastructure</span>
           </div>
         </div>
@@ -279,7 +393,7 @@ export default function App() {
         </nav>
         <div className="ps-sidebar__footer">
           <ThemeSwitch pref={themePref} onChange={setThemePref} />
-          <span>Portside v1.1.0</span>
+          <span>Local Portside v1.2.0</span>
         </div>
       </aside>
       <main className="ps-main">
