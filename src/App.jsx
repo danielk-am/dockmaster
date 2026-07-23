@@ -1,10 +1,10 @@
 // Dockmaster — the app shell (composing-app-shells: brand header, nav,
 // version footer) around the views + management of local dev infra.
-import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Button, Notice, Spinner, __experimentalText as Text } from '@wordpress/components';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 
-const VERSION = '2.2.1';
+const VERSION = '2.3.0';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -15,6 +15,12 @@ const NAV = [
 ];
 
 const get = (p) => fetch(`/api/${p}`).then((r) => r.json());
+
+// Transient feedback lives in one place (the Snippet Manager's idiom): any
+// screen calls notify(), the app renders the snackbar stack, success clears
+// itself after four seconds.
+const NotifyContext = createContext(() => {});
+const useNotify = () => useContext(NotifyContext);
 
 // The system | light | dark triad (the shared convention for our local
 // apps): the preference persists per-app in localStorage, "system" resolves
@@ -66,6 +72,81 @@ function useApi(path, deps = []) {
 }
 
 const Chip = ({ tone = 'neutral', children }) => <span className={`ps-chip ps-chip--${tone}`}>{children}</span>;
+
+// Copy-for-AI. Every row and every section can be lifted out as a prompt you
+// can paste into a cold assistant chat: the frame (what this machine is and
+// what the table holds), the data as plain text, then the question. The
+// screen renders chips and colours; the prompt has to carry the same facts in
+// words, so fields describe themselves for text via getValue — or aiValue
+// where the sort key isn't readable (Services sorts state by number).
+const AI_FRAME = [
+  'You are helping me understand my local development machine (a Mac).',
+  'I run a dashboard called Dockmaster over it: listening ports, the local domains this machine declares (in /etc/hosts, dnsmasq, and /etc/resolver files), a root Caddy ingress that serves *.test over HTTPS to local ports, launchd agents, and the DNS resolution chain.',
+].join(' ');
+
+const aiLabel = (field) => field.label || field.id.charAt(0).toUpperCase() + field.id.slice(1);
+const aiValue = (field, item) => {
+  const raw = field.aiValue ? field.aiValue(item) : field.getValue?.({ item });
+  const text = raw === undefined || raw === null ? '' : String(raw).trim();
+  return text || '—';
+};
+// One entry reads best as labelled lines; a whole table reads best as a
+// markdown table (compact enough that a long ports list still pastes clean).
+const aiEntry = (fields, item) => fields.map((f) => `${aiLabel(f)}: ${aiValue(f, item)}`).join('\n');
+const aiTable = (fields, rows) => {
+  const cell = (f, item) => aiValue(f, item).replace(/\n/g, ' ').replace(/\|/g, '\\|');
+  return [
+    `| ${fields.map(aiLabel).join(' | ')} |`,
+    `| ${fields.map(() => '---').join(' | ')} |`,
+    ...rows.map((item) => `| ${fields.map((f) => cell(f, item)).join(' | ')} |`),
+  ].join('\n');
+};
+const aiPrompt = ({ subject, body, question }) => [AI_FRAME, subject, body, question].filter(Boolean).join('\n\n');
+
+const AI_SECTION_QUESTION =
+  'What is this section telling me about my machine? Explain what I am looking at, then call out anything stale, misconfigured, duplicated, or risky — and what you would clean up first. Ask me before assuming anything is disposable.';
+
+// Takes either the finished text or a builder to await, so building the
+// prompt and copying it share one error path.
+function useCopyPrompt() {
+  const notify = useNotify();
+  return useCallback(async (source, what) => {
+    try {
+      await navigator.clipboard.writeText(typeof source === 'function' ? await source() : source);
+      notify(`Copied ${what} as an AI prompt — paste it into any assistant.`);
+    } catch (e) {
+      notify(`Could not copy: ${e.message}`, 'error');
+    }
+  }, [notify]);
+}
+
+// build() runs at click time so the prompt always carries the data on screen
+// right now, not whatever was there when the button rendered. The machine
+// snapshot on Overview waits on six shell-backed endpoints — several seconds
+// — so the button has to say it is working, or it reads as dead.
+function CopyForAI({ build, what, label = 'Copy for AI' }) {
+  const copyPrompt = useCopyPrompt();
+  const [busy, setBusy] = useState(false);
+  return (
+    <Button
+      __next40pxDefaultSize
+      variant="secondary"
+      isBusy={busy}
+      disabled={busy}
+      accessibleWhenDisabled
+      onClick={async () => {
+        setBusy(true);
+        try {
+          await copyPrompt(build, what);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      {label}
+    </Button>
+  );
+}
 
 // Every notice goes through this wrapper — never <Notice> directly.
 // Notice announces itself to screen readers by running renderToString over
@@ -123,9 +204,23 @@ function Section({ title, actions, children }) {
 
 // All tabular views are DataViews (sort/search/pagination for free — the
 // house standard, same as the Snippet Manager) over the API snapshots.
-function PSDataView({ data, fields, actions, itemKey, perPage = 50 }) {
+function PSDataView({ data, fields, actions = [], itemKey, perPage = 50, aiWhat, aiQuestion }) {
+  const copyPrompt = useCopyPrompt();
   const [view, setView] = useState(() => ({ type: 'table', page: 1, perPage, search: '', fields: fields.map((f) => f.id) }));
   const { data: shown, paginationInfo } = useMemo(() => filterSortAndPaginate(data, view, fields), [data, view, fields]);
+  // Every table ends its action menu the same way: lift this one row out as a
+  // prompt. One place to add it means no table can quietly go without it.
+  const rowActions = [
+    ...actions,
+    {
+      id: 'copy-ai',
+      label: 'Copy as AI prompt',
+      callback: ([item]) => copyPrompt(
+        aiPrompt({ subject: `Below is one entry from ${aiWhat}.`, body: aiEntry(fields, item), question: aiQuestion }),
+        'this entry',
+      ),
+    },
+  ];
   return (
     <div className="ps-dataviews">
       <DataViews
@@ -133,13 +228,136 @@ function PSDataView({ data, fields, actions, itemKey, perPage = 50 }) {
         fields={fields}
         view={view}
         onChangeView={setView}
-        actions={actions}
+        actions={rowActions}
         defaultLayouts={{ table: {} }}
         paginationInfo={paginationInfo}
         getItemId={(item) => String(item[itemKey])}
       />
     </div>
   );
+}
+
+// Field definitions live at module scope: one description of each table, used
+// both by the view that renders it and by the whole-machine snapshot on
+// Overview. (Stable identities also stop the filter/sort memo re-running on
+// every render.)
+const DOMAIN_FIELDS = [
+  { id: 'host', label: 'Domain', getValue: ({ item }) => item.host, render: ({ item }) => <a className="ps-mono" href={item.url} target="_blank" rel="noreferrer">{item.host}</a>, enableGlobalSearch: true },
+  { id: 'port', label: 'Upstream', getValue: ({ item }) => item.port, aiValue: (item) => `127.0.0.1:${item.port}`, render: ({ item }) => <span className="ps-mono">127.0.0.1:{item.port}</span> },
+  { id: 'cert', label: 'Cert', getValue: ({ item }) => (item.cert ? 'minted' : 'missing'), render: ({ item }) => (item.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>) },
+  { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, aiValue: (item) => (item.dns === 'ok' ? 'resolving' : 'pending apply'), render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
+  { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, aiValue: (item) => (item.upstream === 'up' ? 'upstream up' : 'upstream down'), render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
+];
+
+const OBSERVED_FIELDS = [
+  { id: 'name', label: 'Domain', getValue: ({ item }) => item.name, render: ({ item }) => <span className="ps-mono">{item.name}</span>, enableGlobalSearch: true },
+  { id: 'sources', label: 'Declared in', getValue: ({ item }) => item.sources.join(', '), enableGlobalSearch: true },
+  { id: 'system', label: 'System resolves', enableSorting: false, getValue: ({ item }) => [item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—', render: ({ item }) => <span className="ps-mono">{[item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—'}</span> },
+  { id: 'dnsmasq', label: 'dnsmasq says', getValue: ({ item }) => item.dnsmasq || '—', render: ({ item }) => <span className="ps-mono">{item.dnsmasq || '—'}</span> },
+  { id: 'listeners', label: 'Listeners', enableSorting: false, getValue: ({ item }) => item.listeners.join(', '), render: ({ item }) => (
+    item.listeners.length
+      ? <span className="ps-listeners">{item.listeners.map((l) => <span key={l} className="ps-chip ps-chip--mono">{l}</span>)}</span>
+      : <span className="ps-mono">—</span>
+  ) },
+  { id: 'flags', label: 'Flags', enableSorting: false, getValue: ({ item }) => [item.divergent && 'divergent', item.dead && 'no answer'].filter(Boolean).join(', '), render: ({ item }) => (
+    <>
+      {item.divergent && <Chip tone="error">divergent</Chip>}
+      {item.dead && <Chip tone="warning">no answer</Chip>}
+    </>
+  ) },
+];
+
+const PORT_FIELDS = [
+  { id: 'port', label: 'Port', getValue: ({ item }) => item.port, render: ({ item }) => <span className="ps-mono">{item.port}</span> },
+  { id: 'address', label: 'Address', getValue: ({ item }) => item.address, render: ({ item }) => <span className="ps-mono">{item.address}</span>, enableGlobalSearch: true },
+  { id: 'process', label: 'Process', getValue: ({ item }) => item.process || '', enableGlobalSearch: true },
+  { id: 'user', label: 'User', getValue: ({ item }) => item.user || '—' },
+  { id: 'pid', label: 'PID', getValue: ({ item }) => item.pid || 0, render: ({ item }) => <span className="ps-mono">{item.pid || '—'}</span> },
+  { id: 'flags', label: 'Flags', enableSorting: false, getValue: ({ item }) => (item.shared ? 'shared port' : ''), render: ({ item }) => (item.shared ? <Chip tone="warning">shared port</Chip> : null) },
+];
+
+const SERVICE_FIELDS = [
+  { id: 'label', label: 'Label', getValue: ({ item }) => item.label, render: ({ item }) => <span className="ps-mono">{item.label}</span>, enableGlobalSearch: true },
+  { id: 'domain', label: 'Domain', getValue: ({ item }) => item.domain },
+  {
+    id: 'state',
+    label: 'State',
+    getValue: ({ item }) => (item.running ? 2 : item.keepAlive ? 0 : 1),
+    aiValue: (item) => (
+      item.domain === 'system' ? 'root — state needs sudo'
+        : item.running ? `running (pid ${item.pid})`
+        : item.keepAlive ? 'not running, but KeepAlive is set'
+        : 'idle'
+    ),
+    render: ({ item }) => (
+      item.domain === 'system' ? <Chip>root — state needs sudo</Chip>
+        : item.running ? <Chip tone="success">running · pid {item.pid}</Chip>
+        : <Chip tone={item.keepAlive ? 'error' : 'neutral'}>{item.keepAlive ? 'not running (KeepAlive!)' : 'idle'}</Chip>
+    ),
+  },
+  { id: 'lastExit', label: 'Last exit', getValue: ({ item }) => item.lastExit ?? '', render: ({ item }) => <span className="ps-mono">{item.lastExit ?? '—'}</span> },
+];
+
+const DNS_FIELDS = [
+  { id: 'domain', label: 'Scoped domain', getValue: ({ item }) => item.domain, aiValue: (item) => `*.${item.domain}`, render: ({ item }) => <span className="ps-mono">*.{item.domain}</span>, enableGlobalSearch: true },
+  { id: 'ns', label: 'Nameserver', enableSorting: false, getValue: ({ item }) => item.nameservers.join(', ') || '—', render: ({ item }) => <span className="ps-mono">{item.nameservers.join(', ') || '—'}</span> },
+  { id: 'flags', label: 'Flags', getValue: ({ item }) => item.flags || '' },
+];
+
+// What each table holds, in the words the prompt uses — shared by the row
+// action and the section button so both frame the data the same way.
+const AI_WHAT = {
+  domains: 'the *.test domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1)',
+  observed: 'the full list of local domain names this machine declares anywhere — /etc/hosts, dnsmasq rules, and /etc/resolver files — alongside what the system resolver and dnsmasq each answer, and which processes are listening on the address it resolves to',
+  ports: 'the TCP ports currently being listened on by this machine',
+  services: 'the launchd agents I own on this machine (loaded, not disabled)',
+  dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
+};
+
+const AI_ROW_QUESTION = {
+  domains: 'What is this domain about — what is likely running on that upstream port, and does anything here look wrong (missing certificate, DNS not resolving yet, upstream down)?',
+  observed: 'What is this entry about — what most likely created it, what would still depend on it, and would it be safe to remove? Flag it if the entry looks stale, or if the system resolver and dnsmasq disagree.',
+  ports: 'What is this process, and why would it be listening on this port? Tell me whether it is something a developer typically installs deliberately, what would break if I stopped it, and whether the port or bind address is a problem.',
+  services: 'What does this launchd agent most likely do, what would break if I unloaded it, and does its state look healthy? A non-zero last exit code or a KeepAlive job that is not running means something is wrong — say so.',
+  dns: 'What does this scoped resolver do, and is this a sensible configuration for local development? Tell me what would stop working if I removed it.',
+};
+
+// Overview's copy button takes the whole machine, not just the four numbers
+// on screen — it pulls every view so one paste gives the assistant the ports,
+// the domains, the agents and the DNS chain together.
+async function machineSnapshot() {
+  const [overview, ingress, observed, ports, services, dns] = await Promise.all([
+    get('overview'), get('ingress'), get('domains'), get('ports'), get('launchd'), get('dns'),
+  ]);
+  const mine = services.filter((j) => j.owned && !j.disabled);
+  return aiPrompt({
+    subject: 'Below is a full snapshot of the machine, taken from every view in Dockmaster.',
+    body: [
+      '## Summary',
+      `Listening ports: ${overview.counts.ports}${overview.counts.sharedPorts ? ` (${overview.counts.sharedPorts} shared between processes)` : ''}`,
+      `Local domains declared: ${overview.counts.domains}`,
+      `Launchd agents I own and have loaded: ${mine.length}, ${mine.filter((j) => j.running).length} running (the machine has ${overview.counts.services} launchd jobs in total, counting system and disabled ones)`,
+      `DNS chain: ${[dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ')}`,
+      `Ingress daemon: ${ingress.ingress.up ? `up on ${ingress.ingress.aliasIp} + ${ingress.ingress.aliasIp6}` : 'DOWN'}`,
+      '',
+      `## Registered *.test domains (${ingress.domains.length})`,
+      aiTable(DOMAIN_FIELDS, ingress.domains),
+      '',
+      `## All observed local domains (${observed.length})`,
+      aiTable(OBSERVED_FIELDS, observed),
+      '',
+      `## Listening ports (${ports.length})`,
+      aiTable(PORT_FIELDS, ports),
+      '',
+      `## Launchd agents I own (${mine.length})`,
+      aiTable(SERVICE_FIELDS, mine),
+      '',
+      `## Scoped DNS resolvers (${dns.scoped.length})`,
+      `Default upstream: ${dns.defaultNameservers.join(', ') || 'none'}`,
+      aiTable(DNS_FIELDS, dns.scoped),
+    ].join('\n'),
+    question: 'Give me a read on this machine: what is running, how the local domains resolve, and what you would fix or clean up first. Call out anything that looks stale, duplicated, or misconfigured — and ask me before assuming anything is disposable.',
+  });
 }
 
 function Overview({ go }) {
@@ -154,7 +372,15 @@ function Overview({ go }) {
     { id: 'dns', label: 'DNS layers', value: (dns.nextdns ? 1 : 0) + (dns.dnsmasq ? 1 : 0) + 1, sub: [dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ') },
   ];
   return (
-    <Section title="Overview" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
+    <Section
+      title="Overview"
+      actions={
+        <>
+          <CopyForAI build={machineSnapshot} what="the whole machine (ports, domains, agents, DNS)" label="Copy machine for AI" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+        </>
+      }
+    >
       {dns.nextdns && (
         <PSNotice status="warning" isDismissible={false}>
           NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
@@ -272,10 +498,62 @@ function Ingress() {
   })[e.kind] || e.kind;
   const managedHosts = new Set(data.domains.map((d) => d.host));
   const editableHost = (item) => item.inHosts && !managedHosts.has(item.name) && !item.name.startsWith('*');
+  // The screen's own flags column says more than the shared definition can:
+  // it also knows which rows have an edit queued and which the registry owns.
+  const observedFields = OBSERVED_FIELDS.map((f) => (f.id !== 'flags' ? f : {
+    ...f,
+    getValue: ({ item }) => [
+      item.divergent && 'divergent',
+      item.dead && 'no answer',
+      stagedTargets.has(item.name) && 'edit staged',
+      managedHosts.has(item.name) && 'managed by the ingress registry',
+    ].filter(Boolean).join(', '),
+    render: ({ item }) => (
+      <>
+        {item.divergent && <Chip tone="error">divergent</Chip>}
+        {item.dead && <Chip tone="warning">no answer</Chip>}
+        {stagedTargets.has(item.name) && <Chip tone="warning">edit staged</Chip>}
+        {managedHosts.has(item.name) && <Chip tone="success">managed</Chip>}
+      </>
+    ),
+  }));
+  const ingressState = [
+    `Ingress daemon: ${data.ingress.up ? 'up' : 'DOWN'}, serving on ${data.ingress.aliasIp} + ${data.ingress.aliasIp6}`,
+    `Staged DNS/hosts lines waiting for a privileged apply: ${data.dnsPending.length}`,
+    stagedEdits.length ? `Staged edits to privileged files: ${stagedEdits.map(describeEdit).join('; ')}` : 'Staged edits to privileged files: none',
+  ].join('\n');
+  const registeredBlock = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.domains}.`,
+    body: `${ingressState}\n\n${aiTable(DOMAIN_FIELDS, data.domains)}`,
+    question: AI_SECTION_QUESTION,
+  });
+  const observedBlock = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.observed}.`,
+    body: `${ingressState}\n\n${aiTable(observedFields, observed.data || [])}`,
+    question: AI_SECTION_QUESTION,
+  });
+  const wholeScreen = () => aiPrompt({
+    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster — the *.test domains I registered with my local ingress, followed by every local domain name this machine declares anywhere.',
+    body: [
+      ingressState,
+      '',
+      `## Registered *.test domains (${data.domains.length})`,
+      aiTable(DOMAIN_FIELDS, data.domains),
+      '',
+      `## All observed local domains (${(observed.data || []).length})`,
+      aiTable(observedFields, observed.data || []),
+    ].join('\n'),
+    question: AI_SECTION_QUESTION,
+  });
   return (
     <Section
       title="Ingress & Domains"
-      actions={<Button __next40pxDefaultSize variant="secondary" onClick={refreshAll}>Refresh</Button>}
+      actions={
+        <>
+          <CopyForAI build={wholeScreen} what="this whole screen" label="Copy screen for AI" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={refreshAll}>Refresh</Button>
+        </>
+      }
     >
       <div className="ps-dnsrow">
         <Chip tone={data.ingress.up ? 'success' : 'error'}>
@@ -324,20 +602,20 @@ function Ingress() {
           Add domain
         </Button>
       </div>
+      <div className="ps-subhead-row">
+        <h3 className="ps-subhead ps-subhead--flush">Registered *.test domains</h3>
+        <CopyForAI build={registeredBlock} what="the registered domains" />
+      </div>
       <PSDataView
         data={data.domains}
-        fields={[
-          { id: 'host', label: 'Domain', getValue: ({ item }) => item.host, render: ({ item }) => <a className="ps-mono" href={item.url} target="_blank" rel="noreferrer">{item.host}</a>, enableGlobalSearch: true },
-          { id: 'port', label: 'Upstream', getValue: ({ item }) => item.port, render: ({ item }) => <span className="ps-mono">127.0.0.1:{item.port}</span> },
-          { id: 'cert', label: 'Cert', getValue: ({ item }) => (item.cert ? 'minted' : 'missing'), render: ({ item }) => (item.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>) },
-          { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
-          { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
-        ]}
+        fields={DOMAIN_FIELDS}
         actions={[
           { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port) }) },
           { id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmHost(item.host) },
         ]}
         itemKey="host"
+        aiWhat={AI_WHAT.domains}
+        aiQuestion={AI_ROW_QUESTION.domains}
       />
       {edit && (
         <div className="ps-addrow">
@@ -365,7 +643,10 @@ function Ingress() {
       )}
       <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
 
-      <h3 className="ps-subhead">All observed local domains</h3>
+      <div className="ps-subhead-row">
+        <h3 className="ps-subhead ps-subhead--flush">All observed local domains</h3>
+        <CopyForAI build={observedBlock} what="every observed local domain" />
+      </div>
       {stagedEdits.length > 0 && (
         <PSNotice
           status="warning"
@@ -389,25 +670,7 @@ function Ingress() {
         <>
           <PSDataView
             data={observed.data}
-            fields={[
-              { id: 'name', label: 'Domain', getValue: ({ item }) => item.name, render: ({ item }) => <span className="ps-mono">{item.name}</span>, enableGlobalSearch: true },
-              { id: 'sources', label: 'Declared in', getValue: ({ item }) => item.sources.join(', '), enableGlobalSearch: true },
-              { id: 'system', label: 'System resolves', enableSorting: false, render: ({ item }) => <span className="ps-mono">{[item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—'}</span> },
-              { id: 'dnsmasq', label: 'dnsmasq says', getValue: ({ item }) => item.dnsmasq || '—', render: ({ item }) => <span className="ps-mono">{item.dnsmasq || '—'}</span> },
-              { id: 'listeners', label: 'Listeners', enableSorting: false, render: ({ item }) => (
-                item.listeners.length
-                  ? <span className="ps-listeners">{item.listeners.map((l) => <span key={l} className="ps-chip ps-chip--mono">{l}</span>)}</span>
-                  : <span className="ps-mono">—</span>
-              ) },
-              { id: 'flags', label: '', enableSorting: false, render: ({ item }) => (
-                <>
-                  {item.divergent && <Chip tone="error">divergent</Chip>}
-                  {item.dead && <Chip tone="warning">no answer</Chip>}
-                  {stagedTargets.has(item.name) && <Chip tone="warning">edit staged</Chip>}
-                  {managedHosts.has(item.name) && <Chip tone="success">managed</Chip>}
-                </>
-              ) },
-            ]}
+            fields={observedFields}
             actions={[
               { id: 'hosts-ip', label: 'Change hosts IP', isEligible: editableHost, callback: ([item]) => setIpEdit({ kind: 'hosts-set', name: item.name, ip: item.expected?.[0] || item.system.a || '' }) },
               { id: 'hosts-del', label: 'Remove hosts entry', isDestructive: true, isEligible: editableHost, callback: ([item]) => stage({ kind: 'hosts-del', name: item.name }) },
@@ -417,6 +680,8 @@ function Ingress() {
               { id: 'res-del', label: 'Remove resolver file', isDestructive: true, isEligible: (item) => !!item.resolverFile, callback: ([item]) => stage({ kind: 'resolver-del', file: item.resolverFile }) },
             ]}
             itemKey="name"
+            aiWhat={AI_WHAT.observed}
+            aiQuestion={AI_ROW_QUESTION.observed}
           />
           {ipEdit && (
             <div className="ps-addrow">
@@ -475,14 +740,6 @@ function Ports() {
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const rows = data.map((r, i) => ({ ...r, _k: `${r.port}-${r.address}-${i}` }));
-  const fields = [
-    { id: 'port', label: 'Port', getValue: ({ item }) => item.port, render: ({ item }) => <span className="ps-mono">{item.port}</span> },
-    { id: 'address', label: 'Address', getValue: ({ item }) => item.address, render: ({ item }) => <span className="ps-mono">{item.address}</span>, enableGlobalSearch: true },
-    { id: 'process', label: 'Process', getValue: ({ item }) => item.process || '', enableGlobalSearch: true },
-    { id: 'user', label: 'User', getValue: ({ item }) => item.user || '—' },
-    { id: 'pid', label: 'PID', getValue: ({ item }) => item.pid || 0, render: ({ item }) => <span className="ps-mono">{item.pid || '—'}</span> },
-    { id: 'flags', label: '', enableSorting: false, render: ({ item }) => (item.shared ? <Chip tone="warning">shared port</Chip> : null) },
-  ];
   const kill = async (item) => {
     if (!window.confirm(`SIGTERM ${item.process} (pid ${item.pid}) holding :${item.port}?`)) return;
     const r = await fetch('/api/ports/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pid: item.pid }) }).then((x) => x.json());
@@ -492,9 +749,29 @@ function Ports() {
   const actions = [
     { id: 'kill', label: 'Stop process (SIGTERM)', isDestructive: true, callback: ([item]) => kill(item), isEligible: (item) => !!item.pid && item.user && item.user !== 'root' },
   ];
+  const sectionPrompt = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.ports}.`,
+    body: `A "shared port" means two processes hold the same port on different addresses — a wildcard bind beside a specific one.\n\n${aiTable(PORT_FIELDS, rows)}`,
+    question: AI_SECTION_QUESTION,
+  });
   return (
-    <Section title="Listening ports" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
-      <PSDataView data={rows} fields={fields} actions={actions} itemKey="_k" />
+    <Section
+      title="Listening ports"
+      actions={
+        <>
+          <CopyForAI build={sectionPrompt} what="every listening port" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+        </>
+      }
+    >
+      <PSDataView
+        data={rows}
+        fields={PORT_FIELDS}
+        actions={actions}
+        itemKey="_k"
+        aiWhat={AI_WHAT.ports}
+        aiQuestion={AI_ROW_QUESTION.ports}
+      />
       <Text className="ps-hint">A "shared port" means two processes hold the same port on different addresses (a wildcard bind beside a specific one) — fine when intended, a collision when not.</Text>
     </Section>
   );
@@ -540,26 +817,36 @@ function Services() {
     setNotice(r.ok ? { status: 'success', text: `${label} kickstarted.` } : { status: 'error', text: r.error || r.stderr || 'Failed.' });
     reload();
   };
-  const fields = [
-    { id: 'label', label: 'Label', getValue: ({ item }) => item.label, render: ({ item }) => <span className="ps-mono">{item.label}</span>, enableGlobalSearch: true },
-    { id: 'domain', label: 'Domain', getValue: ({ item }) => item.domain },
-    { id: 'state', label: 'State', getValue: ({ item }) => (item.running ? 2 : item.keepAlive ? 0 : 1), render: ({ item }) => (
-      item.domain === 'system' ? <Chip>root — state needs sudo</Chip>
-        : item.running ? <Chip tone="success">running · pid {item.pid}</Chip>
-        : <Chip tone={item.keepAlive ? 'error' : 'neutral'}>{item.keepAlive ? 'not running (KeepAlive!)' : 'idle'}</Chip>
-    ) },
-    { id: 'lastExit', label: 'Last exit', getValue: ({ item }) => item.lastExit ?? '', render: ({ item }) => <span className="ps-mono">{item.lastExit ?? '—'}</span> },
-  ];
   const actions = [
     { id: 'log', label: 'Log', callback: ([item]) => showFile(item.label, 'log'), isEligible: (item) => !!item.log },
     { id: 'edit', label: 'Edit plist', callback: ([item]) => openEditor(item.label), isEligible: (item) => item.domain === 'user' },
     { id: 'plist', label: 'View plist', callback: ([item]) => showFile(item.label, 'plist'), isEligible: (item) => item.domain !== 'user' },
     { id: 'kickstart', label: 'Kickstart', callback: ([item]) => kick(item.label), isEligible: (item) => item.domain === 'user' },
   ];
+  const sectionPrompt = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.services}.`,
+    body: aiTable(SERVICE_FIELDS, rows),
+    question: AI_SECTION_QUESTION,
+  });
   return (
-    <Section title="Launchd services (yours)" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
+    <Section
+      title="Launchd services (yours)"
+      actions={
+        <>
+          <CopyForAI build={sectionPrompt} what="every launchd agent you own" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+        </>
+      }
+    >
       {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
-      <PSDataView data={rows} fields={fields} actions={actions} itemKey="_k" />
+      <PSDataView
+        data={rows}
+        fields={SERVICE_FIELDS}
+        actions={actions}
+        itemKey="_k"
+        aiWhat={AI_WHAT.services}
+        aiQuestion={AI_ROW_QUESTION.services}
+      />
       {panel && (
         <div className="ps-log">
           <div className="ps-log__head">
@@ -595,19 +882,39 @@ function Dns() {
   const { data, error, reload } = useApi('dns');
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
-  const fields = [
-    { id: 'domain', label: 'Scoped domain', getValue: ({ item }) => item.domain, render: ({ item }) => <span className="ps-mono">*.{item.domain}</span>, enableGlobalSearch: true },
-    { id: 'ns', label: 'Nameserver', enableSorting: false, render: ({ item }) => <span className="ps-mono">{item.nameservers.join(', ') || '—'}</span> },
-    { id: 'flags', label: 'Flags', getValue: ({ item }) => item.flags || '' },
-  ];
+  const chainState = [
+    `NextDNS: ${data.nextdns ? 'running' : 'not detected'}`,
+    `dnsmasq: ${data.dnsmasq ? 'running' : 'down'}`,
+    `Default upstream nameservers: ${data.defaultNameservers.join(', ') || 'none'}`,
+    'Order of authority: browser secure-DNS (if on) → NextDNS (if running) → the scoped resolvers below → default upstream.',
+  ].join('\n');
+  const sectionPrompt = () => aiPrompt({
+    subject: `Below, from Dockmaster: the DNS chain on this machine, and ${AI_WHAT.dns}.`,
+    body: `${chainState}\n\n${aiTable(DNS_FIELDS, data.scoped)}`,
+    question: AI_SECTION_QUESTION,
+  });
   return (
-    <Section title="DNS chain" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
+    <Section
+      title="DNS chain"
+      actions={
+        <>
+          <CopyForAI build={sectionPrompt} what="the DNS chain" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+        </>
+      }
+    >
       <div className="ps-dnsrow">
         <Chip tone={data.nextdns ? 'warning' : 'neutral'}>{data.nextdns ? 'NextDNS running' : 'NextDNS not detected'}</Chip>
         <Chip tone={data.dnsmasq ? 'success' : 'error'}>{data.dnsmasq ? 'dnsmasq running' : 'dnsmasq down'}</Chip>
         <Chip>default upstream: {data.defaultNameservers.join(', ') || 'none'}</Chip>
       </div>
-      <PSDataView data={data.scoped} fields={fields} itemKey="id" />
+      <PSDataView
+        data={data.scoped}
+        fields={DNS_FIELDS}
+        itemKey="id"
+        aiWhat={AI_WHAT.dns}
+        aiQuestion={AI_ROW_QUESTION.dns}
+      />
       <Text className="ps-hint">Order of authority in practice: browser secure-DNS (if on) → NextDNS (if running) → scoped resolvers above → default upstream. When a local name misbehaves, walk this list top-down.</Text>
     </Section>
   );
@@ -638,11 +945,21 @@ function usePath() {
   return [page, setPage];
 }
 
+let noticeId = 0;
+
 export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
+  const [notices, setNotices] = useState([]);
   const Page = { overview: Overview, ingress: Ingress, ports: Ports, services: Services, dns: Dns }[page];
+  const dismiss = useCallback((id) => setNotices((n) => n.filter((x) => x.id !== id)), []);
+  const notify = useCallback((content, status = 'success') => {
+    const id = String(++noticeId);
+    setNotices((n) => [...n, { id, content, status, spokenMessage: content }]);
+    if (status === 'success') setTimeout(() => dismiss(id), 4000);
+  }, [dismiss]);
   return (
+    <NotifyContext.Provider value={notify}>
     <div className="ps-app">
       <aside className="ps-sidebar">
         <div className="ps-brand">
@@ -665,6 +982,10 @@ export default function App() {
       <main className="ps-main">
         <Page go={setPage} />
       </main>
+      <div className="ps-notices">
+        <SnackbarList notices={notices} onRemove={dismiss} />
+      </div>
     </div>
+    </NotifyContext.Provider>
   );
 }

@@ -185,7 +185,20 @@ body {
    under Ingress) — with the 24px group spacing above. */
 .ps-subhead { margin: 28px 0 16px; font-size: 15px; }
 
+/* Subhead paired with its own copy-for-AI button: the row carries the
+   spacing, so the heading itself sits flush inside it. */
+.ps-subhead-row {
+	display: flex; align-items: center; justify-content: space-between;
+	gap: 16px; margin: 28px 0 16px;
+}
+.ps-subhead-row .ps-subhead--flush { margin: 0; }
+
+/* Copy confirmations, clear of the sidebar (232px) and the content edge. */
+.ps-notices { position: fixed; bottom: 24px; left: 256px; z-index: 100000; }
+.ps-notices .components-snackbar-list { position: static; }
+
 @media (max-width: 760px) {
+	.ps-notices { left: 16px; right: 16px; bottom: 16px; }
 	.ps-app { flex-direction: column; }
 	.ps-sidebar { width: 100%; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--ps-border); }
 	.ps-nav { flex-direction: row; overflow-x: auto; }
