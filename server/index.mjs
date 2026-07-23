@@ -1,7 +1,8 @@
-// Portside — local dev infrastructure dashboard server.
-// Read-only views over listening ports, local domains, launchd services, and
-// the DNS chain; the only mutations are kickstarting the user's own launchd
-// agents and tailing their logs. Loopback only.
+// Dockmaster — local dev infrastructure dashboard server.
+// Views over listening ports, local domains, launchd services, and the DNS
+// chain, plus management: the ingress domain registry (add/edit/remove),
+// SIGTERM on your own listeners, and editing/kickstarting your own launchd
+// agents. Loopback only.
 import express from 'express';
 import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
@@ -116,7 +117,7 @@ async function gatherDomainSources() {
 
 async function resolveDomain(name) {
   // Wildcard rows probe a synthetic member so the wildcard's behavior shows.
-  const probe = name.startsWith('*.') ? `portside-probe${name.slice(1)}` : name;
+  const probe = name.startsWith('*.') ? `dockmaster-probe${name.slice(1)}` : name;
   const sys = await run('dscacheutil', ['-q', 'host', '-a', 'name', probe]);
   const a = sys.stdout.match(/ip_address:\s*(\S+)/)?.[1] || null;
   const aaaa = sys.stdout.match(/ipv6_address:\s*(\S+)/)?.[1] || null;
@@ -236,8 +237,8 @@ async function ingressState() {
   return {
     ingress: { up: ingressUp, aliasIp: ALIAS_IP, aliasIp6: ALIAS_IP6 },
     dnsPending: pending,
-    applyDnsCommand: 'sudo bash ~/ai/repos/portside/deploy/apply-dns.sh',
-    installCommand: 'sudo bash ~/ai/repos/portside/deploy/install.sh',
+    applyDnsCommand: 'sudo bash ~/ai/repos/dockmaster/deploy/apply-dns.sh',
+    installCommand: 'sudo bash ~/ai/repos/dockmaster/deploy/install.sh',
     domains,
   };
 }
@@ -276,6 +277,24 @@ app.post('/api/ingress/domains', async (req, res) => {
   writeRegistry(reg);
   regenerate();
   res.json({ ok: true, host });
+});
+
+// Edit = repoint an existing domain at a different upstream port. The host
+// (and so its cert and DNS lines) is unchanged — the registry write plus
+// regenerate is the whole job, applied live by the watching daemon.
+app.patch('/api/ingress/domains/:host', (req, res) => {
+  const host = String(req.params.host).toLowerCase();
+  const port = Number(req.body?.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
+  }
+  const reg = readRegistry();
+  const entry = reg.domains.find((d) => d.host === host);
+  if (!entry) return res.status(404).json({ error: 'Not registered.' });
+  entry.port = port;
+  writeRegistry(reg);
+  regenerate();
+  res.json({ ok: true, host, port });
 });
 
 app.delete('/api/ingress/domains/:host', (req, res) => {
@@ -374,16 +393,51 @@ app.post('/api/ports/kill', async (req, res) => {
   }
 });
 
-// Launchd plist viewer: the declared file, read-only.
+// Launchd plist viewer: the declared file. `editable` tells the UI whether
+// the save path below will accept it (user-domain, under ~/Library/LaunchAgents).
+const AGENTS_DIR = path.join(HOME, 'Library/LaunchAgents');
+const plistEditable = (job) => job.domain === 'user' && path.resolve(job.file).startsWith(AGENTS_DIR + path.sep);
+
 app.get('/api/launchd/:label/plist', async (req, res) => {
   const jobs = await listLaunchd();
   const job = jobs.find((j) => j.label === req.params.label);
   if (!job) return res.status(404).json({ error: 'Unknown label.' });
   const r = await run('cat', [job.file]);
-  res.json({ path: job.file, lines: r.stdout.split('\n') });
+  res.json({ path: job.file, content: r.stdout, lines: r.stdout.split('\n'), editable: plistEditable(job) });
+});
+
+// Plist editing: user agents only. The write is validate-then-swap — plutil
+// lints the candidate before it replaces the live file, so a bad edit can
+// never leave launchd pointed at broken XML. System daemons stay sudo-in-a-
+// terminal territory.
+app.put('/api/launchd/:label/plist', async (req, res) => {
+  const content = String(req.body?.content ?? '');
+  if (!content.trim()) return res.status(400).json({ error: 'Empty plist.' });
+  const jobs = await listLaunchd();
+  const job = jobs.find((j) => j.label === req.params.label);
+  if (!job) return res.status(404).json({ error: 'Unknown label.' });
+  if (!plistEditable(job)) return res.status(403).json({ error: 'Only user agents under ~/Library/LaunchAgents are editable here — system daemons need sudo in a terminal.' });
+  const tmp = `${job.file}.dockmaster-tmp`;
+  const { writeFile, rename } = await import('node:fs/promises');
+  await writeFile(tmp, content, 'utf8');
+  const lint = await run('plutil', ['-lint', tmp]);
+  // -lint alone accepts legacy OpenStep scraps (a bare string is a "valid
+  // plist") — also require it to convert to a dict that still declares the
+  // same Label, so a save can never leave launchd a structurally empty file.
+  const meta = lint.ok ? await plistToJson(tmp) : null;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta)) {
+    rmSync(tmp, { force: true });
+    return res.status(400).json({ error: `Invalid plist: ${lint.ok ? 'not a dictionary of launchd keys.' : (lint.stderr || lint.stdout).trim().slice(0, 300)}` });
+  }
+  if (meta.Label !== job.label) {
+    rmSync(tmp, { force: true });
+    return res.status(400).json({ error: `Label must stay "${job.label}" (found ${JSON.stringify(meta.Label ?? null)}).` });
+  }
+  await rename(tmp, job.file);
+  res.json({ ok: true, path: job.file });
 });
 
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')));
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Portside v${appVersion} on http://127.0.0.1:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => console.log(`Dockmaster v${appVersion} on http://127.0.0.1:${PORT}`));

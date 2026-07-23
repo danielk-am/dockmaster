@@ -1,7 +1,7 @@
 #!/bin/bash
 # One-time install of the Local Ingress daemon (supersedes the espanso-ui
 # deploy kit / am.danielk.snippets-proxy). Idempotent — safe to re-run.
-# Run: sudo bash ~/ai/repos/portside/deploy/install.sh
+# Run: sudo bash ~/ai/repos/dockmaster/deploy/install.sh
 #
 # The daemon creates the loopback aliases (127.0.49.49 + fd49::4949) and runs
 # a root Caddy with --watch on the USER-OWNED config in
@@ -11,7 +11,7 @@
 # already staged).
 set -euo pipefail
 
-DEPLOY=/Users/danielkam/ai/repos/portside/deploy
+DEPLOY=/Users/danielkam/ai/repos/dockmaster/deploy
 LABEL=am.danielk.local-ingress
 PLIST=/Library/LaunchDaemons/$LABEL.plist
 
@@ -30,7 +30,7 @@ bootout_and_wait() {
 }
 
 echo "1/5 seed config (registry → Caddyfile/sites/certs as danielkam)"
-sudo -u danielkam /opt/homebrew/bin/node /Users/danielkam/ai/repos/portside/deploy/seed.mjs
+sudo -u danielkam /opt/homebrew/bin/node /Users/danielkam/ai/repos/dockmaster/deploy/seed.mjs
 
 echo "2/5 retire old daemons (snippets-proxy, lo-alias)"
 bootout_and_wait am.danielk.snippets-proxy

@@ -1,14 +1,15 @@
-// Portside — the app shell (composing-app-shells: brand header, nav,
-// version footer) around five read-mostly views of local dev infra.
+// Dockmaster — the app shell (composing-app-shells: brand header, nav,
+// version footer) around the views + management of local dev infra.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Notice, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 
+const VERSION = '2.1.0';
+
 const NAV = [
   { id: 'overview', label: 'Overview' },
-  { id: 'ingress', label: 'Ingress' },
+  { id: 'ingress', label: 'Ingress & Domains' },
   { id: 'ports', label: 'Ports' },
-  { id: 'domains', label: 'Domains' },
   { id: 'services', label: 'Services' },
   { id: 'dns', label: 'DNS chain' },
 ];
@@ -20,7 +21,7 @@ const get = (p) => fetch(`/api/${p}`).then((r) => r.json());
 // against prefers-color-scheme live, and the resolved theme is stamped as
 // data-theme on <html> so the CSS only ever sees the two concrete themes.
 // Light — the Snippet Manager's white approach — is the default.
-const THEME_KEY = 'harbormaster-theme';
+const THEME_KEY = 'dockmaster-theme';
 const THEMES = ['system', 'light', 'dark'];
 
 function useTheme() {
@@ -131,7 +132,7 @@ function Overview({ go }) {
   const { counts, dns } = data;
   const cards = [
     { id: 'ports', label: 'Listening ports', value: counts.ports, sub: counts.sharedPorts ? `${counts.sharedPorts} shared between processes` : 'no shared ports' },
-    { id: 'domains', label: 'Local domains', value: counts.domains, sub: 'hosts, dnsmasq, resolver files' },
+    { id: 'ingress', label: 'Local domains', value: counts.domains, sub: 'hosts, dnsmasq, resolver files' },
     { id: 'services', label: 'Launchd services', value: counts.services, sub: `${counts.running} running (user domain)` },
     { id: 'dns', label: 'DNS layers', value: (dns.nextdns ? 1 : 0) + (dns.dnsmasq ? 1 : 0) + 1, sub: [dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ') },
   ];
@@ -139,7 +140,7 @@ function Overview({ go }) {
     <Section title="Overview" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
       {dns.nextdns && (
         <Notice status="warning" isDismissible={false}>
-          NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check the Domains view for divergence flags.
+          NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
         </Notice>
       )}
       <div className="ps-cards">
@@ -157,15 +158,18 @@ function Overview({ go }) {
 
 // The management half (absorbed from Local Ingress): the registry drives
 // user-owned Caddy site blocks + mkcert certs; the root daemon's
-// caddy --watch applies changes live, so add/remove needs no sudo — only
-// new DNS/hosts lines stage for one privileged apply.
+// caddy --watch applies changes live, so add/edit/remove needs no sudo —
+// only new DNS/hosts lines stage for one privileged apply. The observed-
+// domains diagnostics live here too: one screen views AND manages domains.
 function Ingress() {
   const { data, error, reload } = useApi('ingress');
+  const observed = useApi('domains');
   const [name, setName] = useState('');
   const [port, setPort] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [confirmHost, setConfirmHost] = useState(null);
+  const [edit, setEdit] = useState(null); // { host, port }
   if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
   if (!data) return <Spinner />;
   const add = async () => {
@@ -192,10 +196,28 @@ function Ingress() {
     await fetch(`/api/ingress/domains/${encodeURIComponent(host)}`, { method: 'DELETE' });
     reload();
   };
+  const savePort = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/ingress/domains/${encodeURIComponent(edit.host)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port: Number(edit.port) }),
+      }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
+      setNotice({ status: 'success', text: `${r.host} now proxies 127.0.0.1:${r.port} — live immediately.` });
+      setEdit(null);
+      reload();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const refreshAll = () => { reload(); observed.reload(); };
   return (
     <Section
-      title="Ingress"
-      actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}
+      title="Ingress & Domains"
+      actions={<Button __next40pxDefaultSize variant="secondary" onClick={refreshAll}>Refresh</Button>}
     >
       <div className="ps-dnsrow">
         <Chip tone={data.ingress.up ? 'success' : 'error'}>
@@ -245,9 +267,30 @@ function Ingress() {
           { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
           { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
         ]}
-        actions={[{ id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmHost(item.host) }]}
+        actions={[
+          { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port) }) },
+          { id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmHost(item.host) },
+        ]}
         itemKey="host"
       />
+      {edit && (
+        <div className="ps-addrow">
+          <div className="ps-suffixfield">
+            <input value={edit.host} disabled />
+            <span>→ 127.0.0.1:</span>
+          </div>
+          <input
+            className="ps-search ps-portinput"
+            autoFocus
+            inputMode="numeric"
+            value={edit.port}
+            onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/\D/g, '') })}
+            onKeyDown={(e) => { if (e.key === 'Enter' && edit.port) savePort(); if (e.key === 'Escape') setEdit(null); }}
+          />
+          <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!edit.port} onClick={savePort}>Save port</Button>
+          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
+        </div>
+      )}
       {confirmHost && (
         <Notice status="warning" onRemove={() => setConfirmHost(null)}>
           Remove {confirmHost} (site block + cert)?{' '}
@@ -255,6 +298,32 @@ function Ingress() {
         </Notice>
       )}
       <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
+
+      <h3 className="ps-subhead">All observed local domains</h3>
+      {observed.error && <Notice status="error" isDismissible={false}>{observed.error}</Notice>}
+      {!observed.data && !observed.error && <Spinner />}
+      {observed.data && (
+        <>
+          <PSDataView
+            data={observed.data}
+            fields={[
+              { id: 'name', label: 'Domain', getValue: ({ item }) => item.name, render: ({ item }) => <span className="ps-mono">{item.name}</span>, enableGlobalSearch: true },
+              { id: 'sources', label: 'Declared in', getValue: ({ item }) => item.sources.join(', '), enableGlobalSearch: true },
+              { id: 'system', label: 'System resolves', enableSorting: false, render: ({ item }) => <span className="ps-mono">{[item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—'}</span> },
+              { id: 'dnsmasq', label: 'dnsmasq says', getValue: ({ item }) => item.dnsmasq || '—', render: ({ item }) => <span className="ps-mono">{item.dnsmasq || '—'}</span> },
+              { id: 'listeners', label: 'Listeners', enableSorting: false, render: ({ item }) => <span className="ps-mono">{item.listeners.join(', ') || '—'}</span> },
+              { id: 'flags', label: '', enableSorting: false, render: ({ item }) => (
+                <>
+                  {item.divergent && <Chip tone="error">divergent</Chip>}
+                  {item.dead && <Chip tone="warning">no answer</Chip>}
+                </>
+              ) },
+            ]}
+            itemKey="name"
+          />
+          <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — diagnostics for domains other tools own. "Divergent" = the system resolver and dnsmasq disagree; something (NextDNS, secure DNS, stale cache) answers above the layer you configured. Domains managed by Dockmaster live in the registry above.</Text>
+        </>
+      )}
     </Section>
   );
 }
@@ -289,41 +358,40 @@ function Ports() {
   );
 }
 
-function Domains() {
-  const { data, error, reload } = useApi('domains');
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
-  if (!data) return <Spinner />;
-  const fields = [
-    { id: 'name', label: 'Domain', getValue: ({ item }) => item.name, render: ({ item }) => <span className="ps-mono">{item.name}</span>, enableGlobalSearch: true },
-    { id: 'sources', label: 'Declared in', getValue: ({ item }) => item.sources.join(', '), enableGlobalSearch: true },
-    { id: 'system', label: 'System resolves', enableSorting: false, render: ({ item }) => <span className="ps-mono">{[item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—'}</span> },
-    { id: 'dnsmasq', label: 'dnsmasq says', getValue: ({ item }) => item.dnsmasq || '—', render: ({ item }) => <span className="ps-mono">{item.dnsmasq || '—'}</span> },
-    { id: 'listeners', label: 'Listeners', enableSorting: false, render: ({ item }) => <span className="ps-mono">{item.listeners.join(', ') || '—'}</span> },
-    { id: 'flags', label: '', enableSorting: false, render: ({ item }) => (
-      <>
-        {item.divergent && <Chip tone="error">divergent</Chip>}
-        {item.dead && <Chip tone="warning">no answer</Chip>}
-      </>
-    ) },
-  ];
-  return (
-    <Section title="Local domains" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
-      <PSDataView data={data} fields={fields} itemKey="name" />
-      <Text className="ps-hint">"Divergent" = the system resolver and dnsmasq disagree — something (NextDNS, secure DNS, stale cache) is answering above the layer you configured.</Text>
-    </Section>
-  );
-}
-
 function Services() {
   const { data, error, reload } = useApi('launchd');
   const [panel, setPanel] = useState(null); // { title, lines }
+  const [editor, setEditor] = useState(null); // { label, path, text, dirty, busy }
   const [notice, setNotice] = useState(null);
   if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
   if (!data) return <Spinner />;
   const rows = data.filter((j) => j.owned && !j.disabled).map((j) => ({ ...j, _k: `${j.domain}:${j.label}` }));
   const showFile = async (label, kind) => {
+    setEditor(null);
     const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/${kind}`).then((x) => x.json());
     setPanel(r.error ? { title: label, lines: [r.error] } : { title: r.path, lines: r.lines });
+  };
+  const openEditor = async (label) => {
+    setPanel(null);
+    const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/plist`).then((x) => x.json());
+    if (r.error) return setNotice({ status: 'error', text: r.error });
+    setEditor({ label, path: r.path, text: r.content ?? r.lines.join('\n'), dirty: false, busy: false });
+  };
+  const saveEditor = async () => {
+    setEditor((e) => ({ ...e, busy: true }));
+    const r = await fetch(`/api/launchd/${encodeURIComponent(editor.label)}/plist`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ content: editor.text }),
+    }).then((x) => x.json());
+    if (r.error) {
+      setNotice({ status: 'error', text: r.error });
+      setEditor((e) => ({ ...e, busy: false }));
+    } else {
+      setNotice({ status: 'success', text: `${editor.label} saved (plutil-validated). Kickstart it to apply the change.` });
+      setEditor((e) => ({ ...e, dirty: false, busy: false }));
+      reload();
+    }
   };
   const kick = async (label) => {
     const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/kickstart`, { method: 'POST' }).then((x) => x.json());
@@ -342,7 +410,8 @@ function Services() {
   ];
   const actions = [
     { id: 'log', label: 'Log', callback: ([item]) => showFile(item.label, 'log'), isEligible: (item) => !!item.log },
-    { id: 'plist', label: 'View plist', callback: ([item]) => showFile(item.label, 'plist') },
+    { id: 'edit', label: 'Edit plist', callback: ([item]) => openEditor(item.label), isEligible: (item) => item.domain === 'user' },
+    { id: 'plist', label: 'View plist', callback: ([item]) => showFile(item.label, 'plist'), isEligible: (item) => item.domain !== 'user' },
     { id: 'kickstart', label: 'Kickstart', callback: ([item]) => kick(item.label), isEligible: (item) => item.domain === 'user' },
   ];
   return (
@@ -356,6 +425,24 @@ function Services() {
             <Button size="small" variant="tertiary" onClick={() => setPanel(null)}>Close</Button>
           </div>
           <pre>{panel.lines.join('\n') || '(empty)'}</pre>
+        </div>
+      )}
+      {editor && (
+        <div className="ps-log ps-editor">
+          <div className="ps-log__head">
+            <span className="ps-mono">{editor.path}{editor.dirty ? ' — unsaved' : ''}</span>
+            <span>
+              <Button size="small" variant="primary" isBusy={editor.busy} disabled={!editor.dirty} onClick={saveEditor}>Save</Button>
+              <Button size="small" variant="secondary" onClick={() => kick(editor.label)}>Kickstart</Button>
+              <Button size="small" variant="tertiary" onClick={() => setEditor(null)}>Close</Button>
+            </span>
+          </div>
+          <textarea
+            className="ps-editor__area"
+            spellCheck={false}
+            value={editor.text}
+            onChange={(e) => setEditor({ ...editor, text: e.target.value, dirty: true })}
+          />
         </div>
       )}
     </Section>
@@ -384,12 +471,15 @@ function Dns() {
   );
 }
 
-// Every screen owns its permalink (house rule): /ingress, /ports, /domains,
-// /services, /dns — the server SPA-falls-back all GETs to index.html.
+// Every screen owns its permalink (house rule): /ingress, /ports, /services,
+// /dns — the server SPA-falls-back all GETs to index.html. /domains was
+// absorbed into /ingress; the old slug keeps working.
+const SLUG_ALIASES = { domains: 'ingress' };
 function usePath() {
   const valid = NAV.map((n) => n.id);
   const fromLocation = () => {
-    const slug = window.location.pathname.replace(/^\/+/, '') || 'overview';
+    const raw = window.location.pathname.replace(/^\/+/, '') || 'overview';
+    const slug = SLUG_ALIASES[raw] || raw;
     return valid.includes(slug) ? slug : 'overview';
   };
   const [page, setPageState] = useState(fromLocation);
@@ -409,14 +499,14 @@ function usePath() {
 export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
-  const Page = { overview: Overview, ingress: Ingress, ports: Ports, domains: Domains, services: Services, dns: Dns }[page];
+  const Page = { overview: Overview, ingress: Ingress, ports: Ports, services: Services, dns: Dns }[page];
   return (
     <div className="ps-app">
       <aside className="ps-sidebar">
         <div className="ps-brand">
           <span className="ps-brand__mark">⚓</span>
           <div>
-            <strong>Harbormaster</strong>
+            <strong>Dockmaster</strong>
             <span className="ps-brand__sub">local dev infrastructure</span>
           </div>
         </div>
@@ -427,7 +517,7 @@ export default function App() {
         </nav>
         <div className="ps-sidebar__footer">
           <ThemeSwitch pref={themePref} onChange={setThemePref} />
-          <span>Harbormaster v2.0.0</span>
+          <span>Dockmaster v{VERSION}</span>
         </div>
       </aside>
       <main className="ps-main">

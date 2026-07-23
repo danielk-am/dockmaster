@@ -158,8 +158,21 @@ body {
 .ps-dnsrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
 
 .ps-log { margin-top: 20px; border: 1px solid var(--ps-border); border-radius: 8px; background: var(--ps-surface); overflow: hidden; }
-.ps-log__head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--ps-border); background: var(--ps-subtle); }
+.ps-log__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--ps-border); background: var(--ps-subtle); }
+.ps-log__head .components-button + .components-button { margin-left: 6px; }
 .ps-log pre { margin: 0; padding: 14px; font-size: 12px; max-height: 320px; overflow: auto; }
+
+/* Plist editor: plain mono textarea over the validate-then-swap save API. */
+.ps-editor__area {
+	display: block; width: 100%; min-height: 320px; resize: vertical;
+	border: 0; outline: none; padding: 14px;
+	background: var(--ps-surface); color: var(--ps-text);
+	font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
+}
+
+/* Second-level heading inside a section (e.g. the observed-domains block
+   under Ingress) — with the 24px group spacing above. */
+.ps-subhead { margin: 28px 0 16px; font-size: 15px; }
 
 @media (max-width: 760px) {
 	.ps-app { flex-direction: column; }
@@ -208,6 +221,14 @@ body {
    rule — tables/views always get space below). */
 .ps-dataviews { margin-bottom: 24px; border: 1px solid var(--ps-border); border-radius: 8px; background: var(--ps-surface); }
 .ps-dataviews .dataviews-wrapper { border-radius: 8px; }
+/* Cells wrap instead of forcing the table to scroll sideways (Daniel's
+   rule: wrapped text over horizontal scroll). */
+.ps-dataviews .dataviews-view-table th,
+.ps-dataviews .dataviews-view-table td {
+	white-space: normal;
+}
+.ps-dataviews .dataviews-view-table td { overflow-wrap: anywhere; }
+.ps-dataviews .dataviews-view-table { table-layout: auto; }
 :root[data-theme='dark'] .ps-dataviews .dataviews-view-table th { color: var(--ps-muted); }
 :root[data-theme='dark'] .ps-dataviews .dataviews-view-table td,
 :root[data-theme='dark'] .ps-dataviews .dataviews-view-table th {

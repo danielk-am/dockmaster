@@ -7,7 +7,7 @@
 # The hosts entries matter for browsers: Chrome's Secure DNS (DoH) bypasses
 # scoped resolvers and dnsmasq entirely (.test is guaranteed-NXDOMAIN at
 # any public resolver) but the hosts file is consulted first.
-# Run: sudo bash ~/ai/repos/portside/deploy/apply-dns.sh
+# Run: sudo bash ~/ai/repos/dockmaster/deploy/apply-dns.sh
 set -euo pipefail
 
 STATE=/Users/danielkam/.local/share/local-ingress
