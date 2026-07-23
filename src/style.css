@@ -1,0 +1,95 @@
+:root {
+	--ps-accent: #3858e9;
+	--ps-accent-dark: #2145e6;
+	--ps-border: #e0e0e0;
+	--ps-muted: #757575;
+	--wp-admin-theme-color: var(--ps-accent);
+	--wp-admin-theme-color-darker-10: var(--ps-accent-dark);
+	--wp-components-color-accent: var(--ps-accent);
+	--wp-components-color-accent-darker-10: var(--ps-accent-dark);
+}
+
+* { box-sizing: border-box; }
+body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; color: #1e1e1e; }
+
+.ps-app { display: flex; min-height: 100vh; }
+
+/* Sidebar shell (composing-app-shells: brand / nav / footer). */
+.ps-sidebar {
+	width: 232px;
+	flex-shrink: 0;
+	display: flex;
+	flex-direction: column;
+	background: #1e1e1e;
+	color: #e0e0e0;
+}
+.ps-brand { display: flex; gap: 10px; align-items: center; padding: 20px 16px; }
+.ps-brand__mark { font-size: 22px; }
+.ps-brand strong { display: block; font-size: 15px; color: #fff; }
+.ps-brand__sub { font-size: 11px; color: #949494; }
+.ps-nav { display: flex; flex-direction: column; gap: 2px; padding: 8px; flex: 1; }
+.ps-nav button {
+	appearance: none; border: 0; background: none; color: #e0e0e0;
+	text-align: left; padding: 10px 12px; border-radius: 6px; font-size: 13px;
+	cursor: pointer; min-height: 40px;
+}
+.ps-nav button:hover { background: rgba(255, 255, 255, 0.08); }
+.ps-nav button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
+.ps-sidebar__footer { padding: 14px 16px; border-top: 1px solid rgba(255, 255, 255, 0.12); font-size: 11px; color: #949494; }
+
+.ps-main { flex: 1; min-width: 0; padding: 28px 32px; background: #f6f7f7; }
+
+.ps-section { max-width: 1040px; }
+.ps-section__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
+.ps-section__head h2 { margin: 0; font-size: 20px; }
+.ps-section__actions { display: flex; gap: 8px; align-items: center; }
+
+.ps-search {
+	height: 40px; padding: 0 12px; border: 1px solid #949494; border-radius: 2px;
+	font-size: 13px; min-width: 200px; background: #fff;
+}
+.ps-search:focus { outline: none; border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
+
+.ps-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 20px; }
+.ps-statcard {
+	appearance: none; border: 1px solid var(--ps-border); background: #fff; border-radius: 8px;
+	padding: 20px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+}
+.ps-statcard:hover { border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
+.ps-statcard__value { font-size: 28px; font-weight: 700; }
+.ps-statcard__label { font-size: 13px; font-weight: 600; }
+.ps-statcard__sub { font-size: 12px; color: var(--ps-muted); }
+
+.ps-table { width: 100%; border-collapse: collapse; background: #fff; border: 1px solid var(--ps-border); border-radius: 8px; overflow: hidden; }
+.ps-table th, .ps-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid #f0f0f0; font-size: 13px; }
+.ps-table th { background: #fafafa; font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--ps-muted); }
+.ps-table tr:last-child td { border-bottom: 0; }
+.ps-right { text-align: right; }
+.ps-right .components-button { margin-left: 6px; }
+.ps-mono { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+
+.ps-chip {
+	display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
+	background: #f0f0f0; color: #1e1e1e;
+}
+.ps-chip--success { background: #edfaef; color: #007017; }
+.ps-chip--warning { background: #fcf9e8; color: #7a6000; }
+.ps-chip--error { background: #fcf0f1; color: #8a2424; }
+
+.ps-hint { display: block; margin-top: 16px; color: var(--ps-muted); font-size: 12px; }
+
+.ps-section .components-notice { margin: 0 0 20px; }
+
+.ps-dnsrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
+
+.ps-log { margin-top: 20px; border: 1px solid var(--ps-border); border-radius: 8px; background: #fff; overflow: hidden; }
+.ps-log__head { display: flex; justify-content: space-between; align-items: center; padding: 8px 14px; border-bottom: 1px solid var(--ps-border); background: #fafafa; }
+.ps-log pre { margin: 0; padding: 14px; font-size: 12px; max-height: 320px; overflow: auto; }
+
+@media (max-width: 760px) {
+	.ps-app { flex-direction: column; }
+	.ps-sidebar { width: 100%; flex-direction: row; align-items: center; }
+	.ps-nav { flex-direction: row; overflow-x: auto; }
+	.ps-sidebar__footer { display: none; }
+	.ps-main { padding: 16px; }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "portside",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Local dev infrastructure dashboard — ports, domains, launchd services, DNS chain — in WordPress Design Language",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "serve": "node server/index.mjs",
+    "start": "npm run build && node server/index.mjs"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "@wordpress/components": "^37.0.0",
+    "@wordpress/icons": "^15.2.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "vite": "^6.0.0"
+  }
+}
