@@ -4,9 +4,10 @@
 // SIGTERM on your own listeners, and editing/kickstarting your own launchd
 // agents. Loopback only.
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -87,17 +88,18 @@ async function listPorts() {
 
 async function gatherDomainSources() {
   const domains = new Map(); // name -> { sources: [], expected: [] }
-  const add = (name, source, expected) => {
+  const add = (name, source, expected, extra) => {
     if (!domains.has(name)) domains.set(name, { name, sources: [], expected: [] });
     const d = domains.get(name);
     if (!d.sources.includes(source)) d.sources.push(source);
     if (expected && !d.expected.includes(expected)) d.expected.push(expected);
+    if (extra) Object.assign(d, extra);
   };
   try {
     const hosts = await readFile('/etc/hosts', 'utf8');
     for (const line of hosts.split('\n')) {
       const m = line.match(/^\s*([0-9a-fA-F:.]+)\s+([^\s#]+)/);
-      if (m && !['localhost', 'broadcasthost'].includes(m[2])) add(m[2], '/etc/hosts', m[1]);
+      if (m && !['localhost', 'broadcasthost'].includes(m[2])) add(m[2], '/etc/hosts', m[1], { inHosts: true });
     }
   } catch { /* unreadable */ }
   for (const conf of ['/opt/homebrew/etc/dnsmasq.conf']) {
@@ -105,12 +107,14 @@ async function gatherDomainSources() {
       const text = await readFile(conf, 'utf8');
       for (const line of text.split('\n')) {
         const m = line.match(/^\s*address=\/([^/]+)\/(.+)$/);
-        if (m) add(m[1].startsWith('.') ? `*${m[1]}` : m[1].includes('.') ? m[1] : `*.${m[1]}`, 'dnsmasq', m[2]);
+        // The raw registration key (m[1]) is what an edit must target — the
+        // display name is a wildcard rendering of it.
+        if (m) add(m[1].startsWith('.') ? `*${m[1]}` : m[1].includes('.') ? m[1] : `*.${m[1]}`, 'dnsmasq', m[2], { dnsmasqKey: m[1] });
       }
     } catch { /* absent */ }
   }
   try {
-    for (const f of await readdir('/etc/resolver')) add(`*.${f}`, `/etc/resolver/${f}`, null);
+    for (const f of await readdir('/etc/resolver')) add(`*.${f}`, `/etc/resolver/${f}`, null, { resolverFile: f });
   } catch { /* absent */ }
   return [...domains.values()];
 }
@@ -308,6 +312,78 @@ app.delete('/api/ingress/domains/:host', (req, res) => {
   }
   regenerate();
   res.json({ ok: true });
+});
+
+// ------------------------------------------------- observed-domain edits ----
+// The observed domains (hosts file, dnsmasq rules, resolver files) are
+// root-owned, so the server never touches them — edits are STAGED into a
+// user-owned queue and applied by one privileged run of apply-edits.sh,
+// same doctrine as the ingress DNS lines.
+
+const EDITS_FILE = path.join(HOME, '.local/share/local-ingress/observed-edits.json');
+const readEdits = () => { try { return JSON.parse(readFileSync(EDITS_FILE, 'utf8')); } catch { return []; } };
+const writeEdits = (edits) => writeFileSync(EDITS_FILE, JSON.stringify(edits, null, 2) + '\n');
+const APPLY_EDITS_COMMAND = 'sudo bash ~/ai/repos/dockmaster/deploy/apply-edits.sh';
+
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
+const IP_RE = /^((\d{1,3}\.){3}\d{1,3}|[0-9a-f:]+)$/i;
+const RESOLVER_RE = /^[a-z0-9._-]+$/i;
+
+// One staged op per target (last wins) — the queue is intent, not history.
+const editTarget = (e) => e.kind.startsWith('hosts') ? `hosts:${e.name}` : e.kind.startsWith('dnsmasq') ? `dnsmasq:${e.key}` : `resolver:${e.file}`;
+
+app.get('/api/observed/edits', (_req, res) => res.json({ edits: readEdits(), applyCommand: APPLY_EDITS_COMMAND }));
+
+app.post('/api/observed/edits', (req, res) => {
+  const { kind, name, ip, key, file, content } = req.body || {};
+  const edit = { id: randomUUID(), kind };
+  if (kind === 'hosts-set' || kind === 'hosts-del') {
+    if (!HOSTNAME_RE.test(String(name || ''))) return res.status(400).json({ error: 'Bad hostname.' });
+    edit.name = String(name).toLowerCase();
+    if (kind === 'hosts-set') {
+      if (!IP_RE.test(String(ip || ''))) return res.status(400).json({ error: 'Bad IP address.' });
+      edit.ip = String(ip);
+    }
+  } else if (kind === 'dnsmasq-set' || kind === 'dnsmasq-del') {
+    if (!/^\.?[a-z0-9.-]+$/i.test(String(key || ''))) return res.status(400).json({ error: 'Bad dnsmasq domain key.' });
+    edit.key = String(key);
+    if (kind === 'dnsmasq-set') {
+      if (!IP_RE.test(String(ip || ''))) return res.status(400).json({ error: 'Bad IP address.' });
+      edit.ip = String(ip);
+    }
+  } else if (kind === 'resolver-write' || kind === 'resolver-del') {
+    if (!RESOLVER_RE.test(String(file || ''))) return res.status(400).json({ error: 'Bad resolver file name.' });
+    edit.file = String(file);
+    if (kind === 'resolver-write') {
+      if (typeof content !== 'string' || !content.trim() || content.length > 4000) return res.status(400).json({ error: 'Resolver content must be non-empty text (≤4000 chars).' });
+      edit.content = content.endsWith('\n') ? content : content + '\n';
+    }
+  } else {
+    return res.status(400).json({ error: 'Unknown edit kind.' });
+  }
+  const edits = readEdits().filter((e) => editTarget(e) !== editTarget(edit));
+  edits.push(edit);
+  writeEdits(edits);
+  res.json({ ok: true, edit });
+});
+
+app.delete('/api/observed/edits/:id', (req, res) => {
+  const edits = readEdits();
+  const next = edits.filter((e) => e.id !== req.params.id);
+  if (next.length === edits.length) return res.status(404).json({ error: 'Not staged.' });
+  writeEdits(next);
+  res.json({ ok: true });
+});
+
+// Resolver files are root-owned but world-readable — served for the editor.
+app.get('/api/observed/resolver/:file', async (req, res) => {
+  const file = String(req.params.file);
+  if (!RESOLVER_RE.test(file)) return res.status(400).json({ error: 'Bad resolver file name.' });
+  try {
+    res.json({ file, content: await readFile(path.join('/etc/resolver', file), 'utf8') });
+  } catch {
+    res.status(404).json({ error: 'Unreadable or missing.' });
+  }
 });
 
 app.get('/api/overview', async (_req, res) => {

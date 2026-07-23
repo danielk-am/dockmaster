@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Notice, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 
-const VERSION = '2.1.0';
+const VERSION = '2.2.0';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -164,12 +164,15 @@ function Overview({ go }) {
 function Ingress() {
   const { data, error, reload } = useApi('ingress');
   const observed = useApi('domains');
+  const staged = useApi('observed/edits');
   const [name, setName] = useState('');
   const [port, setPort] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [confirmHost, setConfirmHost] = useState(null);
   const [edit, setEdit] = useState(null); // { host, port }
+  const [ipEdit, setIpEdit] = useState(null); // { kind, name, key?, ip }
+  const [resEdit, setResEdit] = useState(null); // { file, content, busy }
   if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
   if (!data) return <Spinner />;
   const add = async () => {
@@ -213,7 +216,45 @@ function Ingress() {
       setBusy(false);
     }
   };
-  const refreshAll = () => { reload(); observed.reload(); };
+  const refreshAll = () => { reload(); observed.reload(); staged.reload(); };
+  // Observed-domain management: the underlying files are root-owned, so an
+  // edit is STAGED (user-owned queue) and applied by one sudo run — the
+  // ingress doctrine, extended to hosts/dnsmasq/resolver.
+  const stage = async (body) => {
+    const r = await fetch('/api/observed/edits', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((x) => x.json());
+    if (r.error) setNotice({ status: 'error', text: r.error });
+    staged.reload();
+  };
+  const unstage = async (id) => {
+    await fetch(`/api/observed/edits/${id}`, { method: 'DELETE' });
+    staged.reload();
+  };
+  const openResolver = async (file) => {
+    const r = await fetch(`/api/observed/resolver/${encodeURIComponent(file)}`).then((x) => x.json());
+    setResEdit({ file, content: r.error ? '' : r.content });
+  };
+  const stagedEdits = staged.data?.edits || [];
+  // Mirror the server's wildcard rendering so a staged op can be matched
+  // back to its display row.
+  const stagedTargets = new Set(stagedEdits.map((e) => {
+    if (e.name) return e.name;
+    if (e.key) return e.key.startsWith('.') ? `*${e.key}` : e.key.includes('.') ? e.key : `*.${e.key}`;
+    return `*.${e.file}`;
+  }));
+  const describeEdit = (e) => ({
+    'hosts-set': `hosts: ${e.name} → ${e.ip}`,
+    'hosts-del': `hosts: remove ${e.name}`,
+    'dnsmasq-set': `dnsmasq: /${e.key}/ → ${e.ip}`,
+    'dnsmasq-del': `dnsmasq: remove /${e.key}/`,
+    'resolver-write': `resolver: rewrite /etc/resolver/${e.file}`,
+    'resolver-del': `resolver: remove /etc/resolver/${e.file}`,
+  })[e.kind] || e.kind;
+  const managedHosts = new Set(data.domains.map((d) => d.host));
+  const editableHost = (item) => item.inHosts && !managedHosts.has(item.name) && !item.name.startsWith('*');
   return (
     <Section
       title="Ingress & Domains"
@@ -300,6 +341,19 @@ function Ingress() {
       <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
 
       <h3 className="ps-subhead">All observed local domains</h3>
+      {stagedEdits.length > 0 && (
+        <Notice status="warning" isDismissible={false}>
+          <SudoSteps intro={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files (hosts / dnsmasq / resolver) — apply once with sudo.`} command={staged.data.applyCommand} />
+          <ul className="ps-editlist">
+            {stagedEdits.map((e) => (
+              <li key={e.id}>
+                <code>{describeEdit(e)}</code>
+                <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>
+              </li>
+            ))}
+          </ul>
+        </Notice>
+      )}
       {observed.error && <Notice status="error" isDismissible={false}>{observed.error}</Notice>}
       {!observed.data && !observed.error && <Spinner />}
       {observed.data && (
@@ -311,17 +365,76 @@ function Ingress() {
               { id: 'sources', label: 'Declared in', getValue: ({ item }) => item.sources.join(', '), enableGlobalSearch: true },
               { id: 'system', label: 'System resolves', enableSorting: false, render: ({ item }) => <span className="ps-mono">{[item.system.a, item.system.aaaa].filter(Boolean).join(' / ') || '—'}</span> },
               { id: 'dnsmasq', label: 'dnsmasq says', getValue: ({ item }) => item.dnsmasq || '—', render: ({ item }) => <span className="ps-mono">{item.dnsmasq || '—'}</span> },
-              { id: 'listeners', label: 'Listeners', enableSorting: false, render: ({ item }) => <span className="ps-mono">{item.listeners.join(', ') || '—'}</span> },
+              { id: 'listeners', label: 'Listeners', enableSorting: false, render: ({ item }) => (
+                item.listeners.length
+                  ? <span className="ps-listeners">{item.listeners.map((l) => <span key={l} className="ps-chip ps-chip--mono">{l}</span>)}</span>
+                  : <span className="ps-mono">—</span>
+              ) },
               { id: 'flags', label: '', enableSorting: false, render: ({ item }) => (
                 <>
                   {item.divergent && <Chip tone="error">divergent</Chip>}
                   {item.dead && <Chip tone="warning">no answer</Chip>}
+                  {stagedTargets.has(item.name) && <Chip tone="warning">edit staged</Chip>}
+                  {managedHosts.has(item.name) && <Chip tone="success">managed</Chip>}
                 </>
               ) },
             ]}
+            actions={[
+              { id: 'hosts-ip', label: 'Change hosts IP', isEligible: editableHost, callback: ([item]) => setIpEdit({ kind: 'hosts-set', name: item.name, ip: item.expected?.[0] || item.system.a || '' }) },
+              { id: 'hosts-del', label: 'Remove hosts entry', isDestructive: true, isEligible: editableHost, callback: ([item]) => stage({ kind: 'hosts-del', name: item.name }) },
+              { id: 'masq-ip', label: 'Change dnsmasq answer', isEligible: (item) => !!item.dnsmasqKey && !managedHosts.has(item.name), callback: ([item]) => setIpEdit({ kind: 'dnsmasq-set', name: item.name, key: item.dnsmasqKey, ip: item.dnsmasq || '' }) },
+              { id: 'masq-del', label: 'Remove dnsmasq rule', isDestructive: true, isEligible: (item) => !!item.dnsmasqKey && !managedHosts.has(item.name), callback: ([item]) => stage({ kind: 'dnsmasq-del', key: item.dnsmasqKey }) },
+              { id: 'res-edit', label: 'Edit resolver file', isEligible: (item) => !!item.resolverFile, callback: ([item]) => openResolver(item.resolverFile) },
+              { id: 'res-del', label: 'Remove resolver file', isDestructive: true, isEligible: (item) => !!item.resolverFile, callback: ([item]) => stage({ kind: 'resolver-del', file: item.resolverFile }) },
+            ]}
             itemKey="name"
           />
-          <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — diagnostics for domains other tools own. "Divergent" = the system resolver and dnsmasq disagree; something (NextDNS, secure DNS, stale cache) answers above the layer you configured. Domains managed by Dockmaster live in the registry above.</Text>
+          {ipEdit && (
+            <div className="ps-addrow">
+              <div className="ps-suffixfield">
+                <input value={ipEdit.kind === 'dnsmasq-set' ? `address=/${ipEdit.key}/` : ipEdit.name} disabled />
+                <span>{ipEdit.kind === 'dnsmasq-set' ? '' : '→'}</span>
+              </div>
+              <input
+                className="ps-search"
+                autoFocus
+                placeholder="IP address"
+                value={ipEdit.ip}
+                onChange={(e) => setIpEdit({ ...ipEdit, ip: e.target.value.trim() })}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && ipEdit.ip) { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }
+                  if (e.key === 'Escape') setIpEdit(null);
+                }}
+              />
+              <Button
+                __next40pxDefaultSize
+                variant="primary"
+                disabled={!ipEdit.ip}
+                onClick={() => { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }}
+              >
+                Stage edit
+              </Button>
+              <Button __next40pxDefaultSize variant="tertiary" onClick={() => setIpEdit(null)}>Cancel</Button>
+            </div>
+          )}
+          {resEdit && (
+            <div className="ps-log ps-editor">
+              <div className="ps-log__head">
+                <span className="ps-mono">/etc/resolver/{resEdit.file}</span>
+                <span>
+                  <Button size="small" variant="primary" disabled={!resEdit.content.trim()} onClick={() => { stage({ kind: 'resolver-write', file: resEdit.file, content: resEdit.content }); setResEdit(null); }}>Stage edit</Button>
+                  <Button size="small" variant="tertiary" onClick={() => setResEdit(null)}>Close</Button>
+                </span>
+              </div>
+              <textarea
+                className="ps-editor__area ps-editor__area--short"
+                spellCheck={false}
+                value={resEdit.content}
+                onChange={(e) => setResEdit({ ...resEdit, content: e.target.value })}
+              />
+            </div>
+          )}
+          <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — including domains other tools own. These files are root-owned, so edits stage into a queue and apply with the one sudo command above (backups are written; dnsmasq restarts and caches flush automatically). "Divergent" = the system resolver and dnsmasq disagree. Rows marked <em>managed</em> belong to the registry at the top — edit them there.</Text>
         </>
       )}
     </Section>

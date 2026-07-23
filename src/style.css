@@ -143,6 +143,11 @@ body {
 	display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;
 	background: var(--ps-chip-bg); color: var(--ps-chip-text);
 }
+.ps-chip--mono { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-weight: 400; }
+
+/* Listeners render as wrapping chips inside a capped column — long process
+   lists stack instead of stretching the row across the screen. */
+.ps-listeners { display: flex; flex-wrap: wrap; gap: 4px; max-width: 240px; }
 .ps-chip--success { background: var(--ps-success-bg); color: var(--ps-success-text); }
 .ps-chip--warning { background: var(--ps-warning-bg); color: var(--ps-warning-text); }
 .ps-chip--error { background: var(--ps-error-bg); color: var(--ps-error-text); }
@@ -169,6 +174,12 @@ body {
 	background: var(--ps-surface); color: var(--ps-text);
 	font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
 }
+.ps-editor__area--short { min-height: 120px; }
+
+/* Staged-edit queue inside the sudo callout. */
+.ps-editlist { margin: 12px 0 0; padding-left: 20px; }
+.ps-editlist li { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.ps-editlist code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 
 /* Second-level heading inside a section (e.g. the observed-domains block
    under Ingress) — with the 24px group spacing above. */
