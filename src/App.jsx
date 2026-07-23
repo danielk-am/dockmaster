@@ -13,6 +13,44 @@ const NAV = [
 
 const get = (p) => fetch(`/api/${p}`).then((r) => r.json());
 
+// The system | light | dark triad (the shared convention for our local
+// apps): the preference persists per-app in localStorage, "system" resolves
+// against prefers-color-scheme live, and the resolved theme is stamped as
+// data-theme on <html> so the CSS only ever sees the two concrete themes.
+// Light — the Snippet Manager's white approach — is the default.
+const THEME_KEY = 'portside-theme';
+const THEMES = ['system', 'light', 'dark'];
+
+function useTheme() {
+  const [pref, setPref] = useState(() => {
+    const stored = localStorage.getItem(THEME_KEY);
+    return THEMES.includes(stored) ? stored : 'light';
+  });
+  useEffect(() => {
+    localStorage.setItem(THEME_KEY, pref);
+    const mq = window.matchMedia('(prefers-color-scheme: dark)');
+    const apply = () => {
+      document.documentElement.dataset.theme = pref === 'system' ? (mq.matches ? 'dark' : 'light') : pref;
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, [pref]);
+  return [pref, setPref];
+}
+
+function ThemeSwitch({ pref, onChange }) {
+  return (
+    <div className="ps-themeswitch" role="group" aria-label="Theme">
+      {THEMES.map((t) => (
+        <button key={t} className={pref === t ? 'is-active' : ''} onClick={() => onChange(t)}>
+          {t[0].toUpperCase() + t.slice(1)}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 function useApi(path, deps = []) {
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
@@ -222,6 +260,7 @@ function Dns() {
 
 export default function App() {
   const [page, setPage] = useState('overview');
+  const [themePref, setThemePref] = useTheme();
   const Page = { overview: Overview, ports: Ports, domains: Domains, services: Services, dns: Dns }[page];
   return (
     <div className="ps-app">
@@ -238,7 +277,10 @@ export default function App() {
             <button key={n.id} className={page === n.id ? 'is-active' : ''} onClick={() => setPage(n.id)}>{n.label}</button>
           ))}
         </nav>
-        <div className="ps-sidebar__footer">Portside v1.0.0</div>
+        <div className="ps-sidebar__footer">
+          <ThemeSwitch pref={themePref} onChange={setThemePref} />
+          <span>Portside v1.1.0</span>
+        </div>
       </aside>
       <main className="ps-main">
         <Page go={setPage} />

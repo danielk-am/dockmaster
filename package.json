@@ -1,6 +1,6 @@
 {
   "name": "portside",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
   "description": "Local dev infrastructure dashboard — ports, domains, launchd services, DNS chain — in WordPress Design Language",
