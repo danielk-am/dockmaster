@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button, Notice, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 
-const VERSION = '2.2.0';
+const VERSION = '2.2.1';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -67,6 +67,23 @@ function useApi(path, deps = []) {
 
 const Chip = ({ tone = 'neutral', children }) => <span className={`ps-chip ps-chip--${tone}`}>{children}</span>;
 
+// Every notice goes through this wrapper — never <Notice> directly.
+// Notice announces itself to screen readers by running renderToString over
+// its children *during its own render*, and that serializer calls child
+// components as plain functions: their hooks (Button's useInstanceId,
+// SudoSteps' useState) then land on the Notice's own fiber. Hook order holds
+// only while the children keep the same shape — cancel one staged edit and
+// the count shifts, React reads the wrong hook slot, and the render throws
+// (TypeError: undefined is not an object — reading 'length'), which unmounts
+// the app. Handing Notice a plain string keeps the serializer out of the path.
+function PSNotice({ children, spokenMessage, ...props }) {
+  return (
+    <Notice {...props} spokenMessage={spokenMessage ?? (typeof children === 'string' ? children : '')}>
+      {children}
+    </Notice>
+  );
+}
+
 // Privileged-step callout: says WHAT, then numbered steps with the command
 // in a copyable code field — no prose-buried commands (Daniel's rule).
 function SudoSteps({ intro, command }) {
@@ -127,7 +144,7 @@ function PSDataView({ data, fields, actions, itemKey, perPage = 50 }) {
 
 function Overview({ go }) {
   const { data, error, reload } = useApi('overview');
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const { counts, dns } = data;
   const cards = [
@@ -139,9 +156,9 @@ function Overview({ go }) {
   return (
     <Section title="Overview" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
       {dns.nextdns && (
-        <Notice status="warning" isDismissible={false}>
+        <PSNotice status="warning" isDismissible={false}>
           NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
-        </Notice>
+        </PSNotice>
       )}
       <div className="ps-cards">
         {cards.map((c) => (
@@ -173,7 +190,7 @@ function Ingress() {
   const [edit, setEdit] = useState(null); // { host, port }
   const [ipEdit, setIpEdit] = useState(null); // { kind, name, key?, ip }
   const [resEdit, setResEdit] = useState(null); // { file, content, busy }
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const add = async () => {
     setBusy(true);
@@ -267,16 +284,24 @@ function Ingress() {
         <Chip>{data.ingress.aliasIp} + {data.ingress.aliasIp6}</Chip>
       </div>
       {!data.ingress.up && (
-        <Notice status="error" isDismissible={false}>
+        <PSNotice
+          status="error"
+          isDismissible={false}
+          spokenMessage="The root ingress daemon isn’t serving — one privileged install brings it up."
+        >
           <SudoSteps intro="The root ingress daemon isn’t serving — one privileged install brings it up." command={data.installCommand} />
-        </Notice>
+        </PSNotice>
       )}
       {data.dnsPending.length > 0 && (
-        <Notice status="warning" isDismissible={false}>
+        <PSNotice
+          status="warning"
+          isDismissible={false}
+          spokenMessage={`${data.dnsPending.length} staged DNS or hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`}
+        >
           <SudoSteps intro={`${data.dnsPending.length} staged DNS/hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`} command={data.applyDnsCommand} />
-        </Notice>
+        </PSNotice>
       )}
-      {notice && <Notice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</Notice>}
+      {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
       <div className="ps-addrow">
         <div className="ps-suffixfield">
           <input
@@ -333,16 +358,20 @@ function Ingress() {
         </div>
       )}
       {confirmHost && (
-        <Notice status="warning" onRemove={() => setConfirmHost(null)}>
+        <PSNotice status="warning" onRemove={() => setConfirmHost(null)} spokenMessage={`Remove ${confirmHost} — site block and cert?`}>
           Remove {confirmHost} (site block + cert)?{' '}
           <Button size="small" variant="primary" isDestructive onClick={() => remove(confirmHost)}>Remove it</Button>
-        </Notice>
+        </PSNotice>
       )}
       <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
 
       <h3 className="ps-subhead">All observed local domains</h3>
       {stagedEdits.length > 0 && (
-        <Notice status="warning" isDismissible={false}>
+        <PSNotice
+          status="warning"
+          isDismissible={false}
+          spokenMessage={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files — apply once with sudo.`}
+        >
           <SudoSteps intro={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files (hosts / dnsmasq / resolver) — apply once with sudo.`} command={staged.data.applyCommand} />
           <ul className="ps-editlist">
             {stagedEdits.map((e) => (
@@ -352,9 +381,9 @@ function Ingress() {
               </li>
             ))}
           </ul>
-        </Notice>
+        </PSNotice>
       )}
-      {observed.error && <Notice status="error" isDismissible={false}>{observed.error}</Notice>}
+      {observed.error && <PSNotice status="error" isDismissible={false}>{observed.error}</PSNotice>}
       {!observed.data && !observed.error && <Spinner />}
       {observed.data && (
         <>
@@ -443,7 +472,7 @@ function Ingress() {
 
 function Ports() {
   const { data, error, reload } = useApi('ports');
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const rows = data.map((r, i) => ({ ...r, _k: `${r.port}-${r.address}-${i}` }));
   const fields = [
@@ -476,7 +505,7 @@ function Services() {
   const [panel, setPanel] = useState(null); // { title, lines }
   const [editor, setEditor] = useState(null); // { label, path, text, dirty, busy }
   const [notice, setNotice] = useState(null);
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const rows = data.filter((j) => j.owned && !j.disabled).map((j) => ({ ...j, _k: `${j.domain}:${j.label}` }));
   const showFile = async (label, kind) => {
@@ -529,7 +558,7 @@ function Services() {
   ];
   return (
     <Section title="Launchd services (yours)" actions={<Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>}>
-      {notice && <Notice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</Notice>}
+      {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
       <PSDataView data={rows} fields={fields} actions={actions} itemKey="_k" />
       {panel && (
         <div className="ps-log">
@@ -564,7 +593,7 @@ function Services() {
 
 function Dns() {
   const { data, error, reload } = useApi('dns');
-  if (error) return <Notice status="error" isDismissible={false}>{error}</Notice>;
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const fields = [
     { id: 'domain', label: 'Scoped domain', getValue: ({ item }) => item.domain, render: ({ item }) => <span className="ps-mono">*.{item.domain}</span>, enableGlobalSearch: true },
