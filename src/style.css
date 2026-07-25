@@ -267,6 +267,19 @@ body {
 	padding: 0 12px 0 2px; color: var(--ps-muted); font-size: 13px;
 	font-family: SFMono-Regular, Menlo, Consolas, monospace;
 }
+/* TLD picker sitting where the fixed .test suffix used to be — a borderless
+   select flush inside the field, so name + suffix read as one control. */
+.ps-suffixfield select {
+	appearance: none; border: 0; outline: none; height: 100%; cursor: pointer;
+	padding: 0 26px 0 6px; color: var(--ps-muted); font-size: 13px;
+	background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23757575'%3E%3Cpath d='M5.5 8l4.5 4.5L14.5 8z'/%3E%3C/svg%3E") no-repeat right 6px center;
+	background-size: 14px;
+	font-family: SFMono-Regular, Menlo, Consolas, monospace;
+}
+:root[data-theme='dark'] .ps-suffixfield select {
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%239a9a9a'%3E%3Cpath d='M5.5 8l4.5 4.5L14.5 8z'/%3E%3C/svg%3E");
+}
+.ps-suffixfield select:focus { color: var(--ps-text); }
 .ps-portinput { min-width: 90px; width: 90px; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
 .ps-command { cursor: pointer; font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .ps-command:hover { color: var(--ps-accent); }

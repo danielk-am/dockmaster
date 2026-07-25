@@ -27,6 +27,14 @@ time.
   rules, `/etc/resolver/*`) probed two ways: system resolver vs dnsmasq.
   *Divergent* = something above dnsmasq (NextDNS, secure DNS, cache) is
   rewriting reality; *no answer* = a dead mapping.
+- **Vanity TLDs** — the suffixes the ingress serves beside `.test`. `.test`
+  is the builtin, RFC-reserved default; a vanity TLD (`.1dr0`, `.a8c`, …) is
+  an `/etc/resolver/<tld>` file routing the whole suffix to the local
+  resolver, staged as one privileged apply (the same `apply-edits.sh` run as
+  every observed edit) — or zero sudo when the resolver file already exists.
+  Once registered a TLD shows in the add-domain suffix dropdown on Ingress &
+  Domains, where individual sites (`ci.1dr0` → a local port) are added exactly
+  like `.test` ones. Vanity suffixes resolve only on this Mac.
 - **Ports** — all TCP listeners from `netstat` (sees root daemons too),
   with process, user, a *shared port* flag when a wildcard bind and a
   specific bind coexist on one port (the Studio-beside-Caddy
@@ -39,7 +47,7 @@ time.
 - **DNS chain** — scoped resolvers, default upstream, NextDNS/dnsmasq
   liveness, and the practical order of authority.
 
-Every screen owns its permalink (`/ingress`, `/ports`, `/services`,
+Every screen owns its permalink (`/ingress`, `/tlds`, `/ports`, `/services`,
 `/dns`; `/domains` redirects into `/ingress`). All tabular views are
 `@wordpress/dataviews` with wrapped cells — no sideways scrolling.
 

@@ -15,13 +15,18 @@ import { fileURLToPath } from 'node:url';
 import {
   ALIAS_IP,
   ALIAS_IP6,
+  BUILTIN_TLDS,
   CERTS,
   MKCERT,
+  RESOLVER_DIR,
   ensureDirs,
   readRegistry,
+  readTlds,
   refreshDnsPending,
   regenerate,
+  resolverSeed,
   writeRegistry,
+  writeTlds,
 } from './ingress-lib.mjs';
 
 const PORT = Number(process.env.PORT || 4950);
@@ -255,13 +260,19 @@ app.use(express.json());
 app.get('/api/ingress', async (_req, res) => res.json(await ingressState()));
 
 app.post('/api/ingress/domains', async (req, res) => {
-  // The UI sends the bare NAME; .test is the fixed suffix (Daniel's nit —
-  // never type .test on every line). Full hosts are tolerated for the API.
-  const name = String(req.body?.name ?? req.body?.host ?? '').trim().toLowerCase().replace(/\.test$/, '');
-  const host = `${name}.test`;
+  // The UI sends the bare NAME plus a TLD; the suffix is never typed on every
+  // line (Daniel's nit). .test is the default; vanity TLDs must be registered
+  // first. Full hosts are tolerated for the API.
+  const tld = String(req.body?.tld ?? 'test').trim().toLowerCase().replace(/^\./, '');
+  const validTlds = [...BUILTIN_TLDS, ...readTlds().tlds.map((t) => String(t).toLowerCase())];
+  if (!validTlds.includes(tld)) {
+    return res.status(400).json({ error: `.${tld} isn't a registered TLD — add it under Vanity TLDs first.` });
+  }
+  const name = String(req.body?.name ?? req.body?.host ?? '').trim().toLowerCase().replace(new RegExp(`\\.${tld}$`), '');
+  const host = `${name}.${tld}`;
   const port = Number(req.body?.port);
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-    return res.status(400).json({ error: 'Name must be letters/digits/hyphens (the .test suffix is automatic).' });
+    return res.status(400).json({ error: `Name must be letters/digits/hyphens (the .${tld} suffix is automatic).` });
   }
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
@@ -331,6 +342,14 @@ const RESOLVER_RE = /^[a-z0-9._-]+$/i;
 
 // One staged op per target (last wins) — the queue is intent, not history.
 const editTarget = (e) => e.kind.startsWith('hosts') ? `hosts:${e.name}` : e.kind.startsWith('dnsmasq') ? `dnsmasq:${e.key}` : `resolver:${e.file}`;
+// Push an op onto the queue, superseding any op already targeting the same
+// file/name/key. Shared by the observed-edit route and the vanity-TLD routes.
+const queueEdit = (edit) => {
+  const edits = readEdits().filter((e) => editTarget(e) !== editTarget(edit));
+  edits.push(edit);
+  writeEdits(edits);
+  return edit;
+};
 
 app.get('/api/observed/edits', (_req, res) => res.json({ edits: readEdits(), applyCommand: APPLY_EDITS_COMMAND }));
 
@@ -361,9 +380,7 @@ app.post('/api/observed/edits', (req, res) => {
   } else {
     return res.status(400).json({ error: 'Unknown edit kind.' });
   }
-  const edits = readEdits().filter((e) => editTarget(e) !== editTarget(edit));
-  edits.push(edit);
-  writeEdits(edits);
+  queueEdit(edit);
   res.json({ ok: true, edit });
 });
 
@@ -384,6 +401,92 @@ app.get('/api/observed/resolver/:file', async (req, res) => {
   } catch {
     res.status(404).json({ error: 'Unreadable or missing.' });
   }
+});
+
+// ------------------------------------------------------------ vanity TLDs ----
+// A vanity TLD (.1dr0, .a8c, …) is a whole custom suffix routed to the local
+// resolver, so any <name>.<tld> can then be registered as an ingress site just
+// like a .test one. Registering a TLD needs exactly one privileged bit — the
+// /etc/resolver/<tld> file — which is staged into the same queue as the
+// observed-domain edits and applied by the one apply-edits.sh sudo run. The
+// per-site cert, Caddy vhost, and dnsmasq/hosts lines are the existing ingress
+// machinery, unchanged.
+// Vanity TLDs may start with a digit (.1dr0 is the canonical example and its
+// resolver file already works) — require alphanumeric ends, hyphens allowed
+// inside, and at least one letter so an all-numeric label (which reads like an
+// IP octet) is refused.
+const TLD_RE = /^[a-z0-9](?:[a-z0-9-]{0,29}[a-z0-9])?$/;
+const validTld = (tld) => TLD_RE.test(tld) && /[a-z]/.test(tld);
+const resolverPath = (tld) => path.join(RESOLVER_DIR, tld);
+const sitesUnder = (tld) => readRegistry().domains.filter((d) => d.host.endsWith(`.${tld}`)).map((d) => d.host);
+
+function tldsState() {
+  ensureDirs();
+  const custom = readTlds().tlds.map((t) => String(t).toLowerCase());
+  const all = [...BUILTIN_TLDS, ...custom.filter((t) => !BUILTIN_TLDS.includes(t))];
+  const edits = readEdits();
+  const pending = (tld) => edits.some((e) => e.file === tld && (e.kind === 'resolver-write' || e.kind === 'resolver-del'));
+  const tlds = all.map((tld) => {
+    const hosts = sitesUnder(tld);
+    return {
+      tld,
+      builtin: BUILTIN_TLDS.includes(tld),
+      resolver: existsSync(resolverPath(tld)),
+      resolverPending: pending(tld),
+      sites: hosts.length,
+      hosts,
+    };
+  });
+  return { tlds, applyCommand: APPLY_EDITS_COMMAND };
+}
+
+app.get('/api/tlds', (_req, res) => res.json(tldsState()));
+
+app.post('/api/tlds', (req, res) => {
+  const tld = String(req.body?.tld ?? '').trim().toLowerCase().replace(/^\./, '');
+  if (!validTld(tld)) {
+    return res.status(400).json({ error: 'TLD must be letters, digits, and inner hyphens (no dots), start and end alphanumeric, and include at least one letter.' });
+  }
+  if (BUILTIN_TLDS.includes(tld)) {
+    return res.status(409).json({ error: `.${tld} is the builtin default and is always available.` });
+  }
+  const reg = readTlds();
+  if (reg.tlds.map((t) => String(t).toLowerCase()).includes(tld)) {
+    return res.status(409).json({ error: `.${tld} is already registered.` });
+  }
+  reg.tlds.push(tld);
+  reg.tlds.sort();
+  writeTlds(reg);
+  // Stage the resolver file only when it isn't already on disk (the .a8c /
+  // .1dr0 files predate Dockmaster, so re-adding them needs no sudo).
+  let staged = false;
+  if (!existsSync(resolverPath(tld))) {
+    queueEdit({ id: randomUUID(), kind: 'resolver-write', file: tld, content: resolverSeed() });
+    staged = true;
+  }
+  res.json({ ok: true, tld, staged, applyCommand: APPLY_EDITS_COMMAND });
+});
+
+app.delete('/api/tlds/:tld', (req, res) => {
+  const tld = String(req.params.tld).toLowerCase().replace(/^\./, '');
+  if (BUILTIN_TLDS.includes(tld)) return res.status(403).json({ error: `.${tld} is builtin and cannot be removed.` });
+  const reg = readTlds();
+  const list = reg.tlds.map((t) => String(t).toLowerCase());
+  if (!list.includes(tld)) return res.status(404).json({ error: `.${tld} is not registered.` });
+  const using = sitesUnder(tld);
+  if (using.length) {
+    return res.status(409).json({ error: `Remove its ${using.length} site${using.length > 1 ? 's' : ''} first: ${using.join(', ')}.` });
+  }
+  reg.tlds = list.filter((t) => t !== tld);
+  writeTlds(reg);
+  // Drop any still-pending resolver edit for this TLD first — otherwise an
+  // add-then-remove before applying would leave an orphaned resolver-write
+  // that still creates the file on the next sudo run.
+  writeEdits(readEdits().filter((e) => !(e.file === tld && (e.kind === 'resolver-write' || e.kind === 'resolver-del'))));
+  // Then stage removal of the resolver file, but only if it's actually on disk
+  // (the dnsmasq wildcard, if any, goes inert once nothing routes the suffix).
+  if (existsSync(resolverPath(tld))) queueEdit({ id: randomUUID(), kind: 'resolver-del', file: tld });
+  res.json({ ok: true, tld, applyCommand: APPLY_EDITS_COMMAND });
 });
 
 app.get('/api/overview', async (_req, res) => {

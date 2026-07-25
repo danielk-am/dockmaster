@@ -11,13 +11,45 @@ export const STATE = path.join(os.homedir(), '.local/share/local-ingress');
 export const SITES = path.join(STATE, 'sites');
 export const CERTS = path.join(STATE, 'certs');
 export const REGISTRY = path.join(STATE, 'domains.json');
+export const TLDS = path.join(STATE, 'tlds.json');
 export const CADDYFILE = path.join(STATE, 'Caddyfile');
 export const DNS_PENDING = path.join(STATE, 'dns-pending.conf');
 export const DNSMASQ_CONF = '/opt/homebrew/etc/dnsmasq.conf';
+export const RESOLVER_DIR = '/etc/resolver';
 export const MKCERT = '/opt/homebrew/bin/mkcert';
+
+// .test is the reserved, RFC-6761 suffix — always available, never removable.
+// Vanity TLDs (.1dr0, .a8c, …) are opt-in and live in the registry below.
+export const BUILTIN_TLDS = ['test'];
 
 export const ensureDirs = () => {
 	for (const dir of [STATE, SITES, CERTS]) fs.mkdirSync(dir, { recursive: true });
+};
+
+// The vanity-TLD registry — the set of custom suffixes the ingress will accept
+// beside .test. One flat list of bare labels; the resolver file and any per-
+// site cert/vhost are derived, never stored here.
+export const readTlds = () => {
+	try {
+		const t = JSON.parse(fs.readFileSync(TLDS, 'utf8'));
+		return { tlds: Array.isArray(t.tlds) ? t.tlds : [] };
+	} catch {
+		return { tlds: [] };
+	}
+};
+
+export const writeTlds = (t) => fs.writeFileSync(TLDS, JSON.stringify(t, null, '\t') + '\n');
+
+// A new vanity TLD's /etc/resolver/<tld> file mirrors the proven .test one
+// exactly (routes the whole suffix to the local resolver), so it behaves
+// identically to the suffix that already works. Fall back to the known-good
+// content if .test isn't on disk yet.
+export const resolverSeed = () => {
+	try {
+		const c = fs.readFileSync(path.join(RESOLVER_DIR, 'test'), 'utf8');
+		if (c.trim()) return c.endsWith('\n') ? c : c + '\n';
+	} catch { /* fall through to the default */ }
+	return 'nameserver 127.0.0.1\n';
 };
 
 export const readRegistry = () => {

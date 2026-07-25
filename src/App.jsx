@@ -5,11 +5,12 @@ import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } fro
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 import { chevronLeft, menu } from '@wordpress/icons';
 
-const VERSION = '2.4.0';
+const VERSION = '2.5.0';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
   { id: 'ingress', label: 'Ingress & Domains' },
+  { id: 'tlds', label: 'Vanity TLDs' },
   { id: 'ports', label: 'Ports' },
   { id: 'services', label: 'Services' },
   { id: 'dns', label: 'DNS chain' },
@@ -312,11 +313,29 @@ const DNS_FIELDS = [
   { id: 'flags', label: 'Flags', getValue: ({ item }) => item.flags || '' },
 ];
 
+const TLD_FIELDS = [
+  { id: 'tld', label: 'TLD', getValue: ({ item }) => item.tld, aiValue: (item) => `*.${item.tld}`, render: ({ item }) => <span className="ps-mono">*.{item.tld}</span>, enableGlobalSearch: true },
+  { id: 'kind', label: 'Kind', getValue: ({ item }) => (item.builtin ? 'builtin' : 'vanity'), render: ({ item }) => (item.builtin ? <Chip>builtin</Chip> : <Chip tone="success">vanity</Chip>) },
+  {
+    id: 'resolver',
+    label: 'Resolver file',
+    getValue: ({ item }) => (item.resolverPending ? 'pending apply' : item.resolver ? 'installed' : 'missing'),
+    aiValue: (item) => (item.resolverPending ? 'staged, pending sudo apply' : item.resolver ? `installed (/etc/resolver/${item.tld})` : 'missing'),
+    render: ({ item }) => (
+      item.resolverPending ? <Chip tone="warning">pending apply</Chip>
+        : item.resolver ? <Chip tone="success">/etc/resolver/{item.tld}</Chip>
+        : <Chip tone="error">missing</Chip>
+    ),
+  },
+  { id: 'sites', label: 'Sites', getValue: ({ item }) => item.sites, aiValue: (item) => (item.hosts?.length ? item.hosts.join(', ') : '0'), render: ({ item }) => <span className="ps-mono">{item.sites}</span> },
+];
+
 // What each table holds, in the words the prompt uses — shared by the row
 // action and the section button so both frame the data the same way.
 const AI_WHAT = {
-  domains: 'the *.test domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1)',
+  domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD)',
   observed: 'the full list of local domain names this machine declares anywhere — /etc/hosts, dnsmasq rules, and /etc/resolver files — alongside what the system resolver and dnsmasq each answer, and which processes are listening on the address it resolves to',
+  tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
   services: 'the launchd agents I own on this machine (loaded, not disabled)',
   dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
@@ -325,6 +344,7 @@ const AI_WHAT = {
 const AI_ROW_QUESTION = {
   domains: 'What is this domain about — what is likely running on that upstream port, and does anything here look wrong (missing certificate, DNS not resolving yet, upstream down)?',
   observed: 'What is this entry about — what most likely created it, what would still depend on it, and would it be safe to remove? Flag it if the entry looks stale, or if the system resolver and dnsmasq disagree.',
+  tlds: 'What is this suffix for, is its resolver file in place, and does anything look off — a vanity TLD with no sites, or a resolver file still pending a privileged apply?',
   ports: 'What is this process, and why would it be listening on this port? Tell me whether it is something a developer typically installs deliberately, what would break if I stopped it, and whether the port or bind address is a problem.',
   services: 'What does this launchd agent most likely do, what would break if I unloaded it, and does its state look healthy? A non-zero last exit code or a KeepAlive job that is not running means something is wrong — say so.',
   dns: 'What does this scoped resolver do, and is this a sensible configuration for local development? Tell me what would stop working if I removed it.',
@@ -348,7 +368,7 @@ async function machineSnapshot() {
       `DNS chain: ${[dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ')}`,
       `Ingress daemon: ${ingress.ingress.up ? `up on ${ingress.ingress.aliasIp} + ${ingress.ingress.aliasIp6}` : 'DOWN'}`,
       '',
-      `## Registered *.test domains (${ingress.domains.length})`,
+      `## Registered ingress domains (${ingress.domains.length})`,
       aiTable(DOMAIN_FIELDS, ingress.domains),
       '',
       `## All observed local domains (${observed.length})`,
@@ -416,7 +436,9 @@ function Ingress() {
   const { data, error, reload } = useApi('ingress');
   const observed = useApi('domains');
   const staged = useApi('observed/edits');
+  const tlds = useApi('tlds');
   const [name, setName] = useState('');
+  const [tld, setTld] = useState('test');
   const [port, setPort] = useState('');
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
@@ -433,7 +455,7 @@ function Ingress() {
       const r = await fetch('/api/ingress/domains', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, port: Number(port) }),
+        body: JSON.stringify({ name, tld, port: Number(port) }),
       }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
       setNotice({ status: 'success', text: `${r.host} registered — live as soon as any staged DNS applies.` });
       setName('');
@@ -467,7 +489,7 @@ function Ingress() {
       setBusy(false);
     }
   };
-  const refreshAll = () => { reload(); observed.reload(); staged.reload(); };
+  const refreshAll = () => { reload(); observed.reload(); staged.reload(); tlds.reload(); };
   // Observed-domain management: the underlying files are root-owned, so an
   // edit is STAGED (user-owned queue) and applied by one sudo run — the
   // ingress doctrine, extended to hosts/dnsmasq/resolver.
@@ -541,11 +563,11 @@ function Ingress() {
     question: AI_SECTION_QUESTION,
   });
   const wholeScreen = () => aiPrompt({
-    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster — the *.test domains I registered with my local ingress, followed by every local domain name this machine declares anywhere.',
+    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster — the domains I registered with my local ingress (each under .test or a vanity TLD), followed by every local domain name this machine declares anywhere.',
     body: [
       ingressState,
       '',
-      `## Registered *.test domains (${data.domains.length})`,
+      `## Registered ingress domains (${data.domains.length})`,
       aiTable(DOMAIN_FIELDS, data.domains),
       '',
       `## All observed local domains (${(observed.data || []).length})`,
@@ -593,10 +615,14 @@ function Ingress() {
           <input
             placeholder="myapp"
             value={name}
-            onChange={(e) => setName(e.target.value.toLowerCase().replace(/\.test$/, ''))}
+            onChange={(e) => setName(e.target.value.toLowerCase().replace(new RegExp(`\\.${tld}$`), ''))}
             onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
           />
-          <span>.test</span>
+          <select className="ps-suffix-select" value={tld} aria-label="TLD" onChange={(e) => setTld(e.target.value)}>
+            {(tlds.data?.tlds?.map((t) => t.tld) || ['test']).map((t) => (
+              <option key={t} value={t}>.{t}</option>
+            ))}
+          </select>
         </div>
         <input
           className="ps-search ps-portinput"
@@ -611,7 +637,7 @@ function Ingress() {
         </Button>
       </div>
       <div className="ps-subhead-row">
-        <h3 className="ps-subhead ps-subhead--flush">Registered *.test domains</h3>
+        <h3 className="ps-subhead ps-subhead--flush">Registered domains</h3>
         <CopyForAI build={registeredBlock} what="the registered domains" />
       </div>
       <PSDataView
@@ -739,6 +765,134 @@ function Ingress() {
           <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — including domains other tools own. These files are root-owned, so edits stage into a queue and apply with the one sudo command above (backups are written; dnsmasq restarts and caches flush automatically). "Divergent" = the system resolver and dnsmasq disagree. Rows marked <em>managed</em> belong to the registry at the top — edit them there.</Text>
         </>
       )}
+    </Section>
+  );
+}
+
+// Vanity TLDs: the set of custom suffixes the ingress serves beside .test.
+// Registering one is a registry write plus, if the /etc/resolver/<tld> file
+// isn't already there, one staged privileged edit — applied by the same
+// apply-edits.sh run as every other observed-domain edit. Sites under a TLD
+// are added on the Ingress screen (the TLD becomes a suffix in the dropdown).
+function Tlds() {
+  const { data, error, reload } = useApi('tlds');
+  const staged = useApi('observed/edits');
+  const [label, setLabel] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [confirm, setConfirm] = useState(null);
+  if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
+  if (!data) return <Spinner />;
+  const refreshAll = () => { reload(); staged.reload(); };
+  const add = async () => {
+    setBusy(true);
+    setNotice(null);
+    try {
+      const r = await fetch('/api/tlds', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tld: label }),
+      }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
+      setNotice({
+        status: 'success',
+        text: r.staged
+          ? `.${r.tld} registered — apply the staged resolver file below, then it’s a suffix you can add sites under.`
+          : `.${r.tld} registered — its resolver file was already in place, so it’s ready now.`,
+      });
+      setLabel('');
+      refreshAll();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const remove = async (tld) => {
+    setConfirm(null);
+    const r = await fetch(`/api/tlds/${encodeURIComponent(tld)}`, { method: 'DELETE' })
+      .then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; })
+      .catch((e) => ({ error: e.message }));
+    if (r.error) setNotice({ status: 'error', text: r.error });
+    refreshAll();
+  };
+  const unstage = async (id) => {
+    await fetch(`/api/observed/edits/${id}`, { method: 'DELETE' });
+    refreshAll();
+  };
+  const resolverEdits = (staged.data?.edits || []).filter((e) => e.kind === 'resolver-write' || e.kind === 'resolver-del');
+  const describeEdit = (e) => (e.kind === 'resolver-write' ? `resolver: write /etc/resolver/${e.file}` : `resolver: remove /etc/resolver/${e.file}`);
+  const sectionPrompt = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.tlds}.`,
+    body: aiTable(TLD_FIELDS, data.tlds),
+    question: AI_SECTION_QUESTION,
+  });
+  return (
+    <Section
+      title="Vanity TLDs"
+      actions={
+        <>
+          <CopyForAI build={sectionPrompt} what="the registered TLDs" label="Copy screen for AI" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={refreshAll}>Refresh</Button>
+        </>
+      }
+    >
+      {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
+      {resolverEdits.length > 0 && (
+        <PSNotice
+          status="warning"
+          isDismissible={false}
+          spokenMessage={`${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged — apply once with sudo.`}
+        >
+          <SudoSteps intro={`${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged (/etc/resolver) — apply once with sudo to route the suffix to the local resolver.`} command={data.applyCommand} />
+          <ul className="ps-editlist">
+            {resolverEdits.map((e) => (
+              <li key={e.id}>
+                <code>{describeEdit(e)}</code>
+                <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>
+              </li>
+            ))}
+          </ul>
+        </PSNotice>
+      )}
+      <div className="ps-addrow">
+        <div className="ps-suffixfield">
+          <span>.</span>
+          <input
+            placeholder="1dr0"
+            value={label}
+            onChange={(e) => setLabel(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter' && label) add(); }}
+          />
+        </div>
+        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!label} onClick={add}>
+          Add TLD
+        </Button>
+      </div>
+      <PSDataView
+        data={data.tlds}
+        fields={TLD_FIELDS}
+        actions={[
+          {
+            id: 'remove',
+            label: 'Remove',
+            isDestructive: true,
+            isEligible: (item) => !item.builtin && item.sites === 0,
+            callback: ([item]) => setConfirm(item.tld),
+          },
+        ]}
+        itemKey="tld"
+        aiWhat={AI_WHAT.tlds}
+        aiQuestion={AI_ROW_QUESTION.tlds}
+      />
+      {confirm && (
+        <PSNotice status="warning" onRemove={() => setConfirm(null)} spokenMessage={`Remove the .${confirm} TLD?`}>
+          Remove the <span className="ps-mono">.{confirm}</span> TLD (deregisters the suffix; stages removal of its resolver file)?{' '}
+          <Button size="small" variant="primary" isDestructive onClick={() => remove(confirm)}>Remove it</Button>
+        </PSNotice>
+      )}
+      <Text className="ps-hint">
+        .test is builtin and always available. A vanity TLD adds an <span className="ps-mono">/etc/resolver/&lt;tld&gt;</span> file that routes the whole suffix to the local resolver — one privileged apply. Add sites under it from <strong>Ingress &amp; Domains</strong>, where every registered TLD shows in the suffix dropdown. Removing a TLD needs its sites gone first. Vanity suffixes resolve only on this Mac; .test is the RFC-reserved, zero-risk choice.
+      </Text>
     </Section>
   );
 }
@@ -959,7 +1113,7 @@ export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
   const [notices, setNotices] = useState([]);
-  const Page = { overview: Overview, ingress: Ingress, ports: Ports, services: Services, dns: Dns }[page];
+  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, dns: Dns }[page];
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   const setSidebarCollapsed = useCallback((v) => {
     setSidebarCollapsedState(v);
