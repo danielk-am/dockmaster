@@ -22,7 +22,10 @@ time.
   add (bare name, `.test` is the fixed suffix), change upstream port, or
   remove — all applied live by the root `caddy run --watch` daemon with
   zero sudo; only brand-new DNS/hosts lines stage for one privileged
-  apply, surfaced as numbered steps with a copyable command. Below it,
+  apply, surfaced as numbered steps with a copyable command. A domain can
+  be **linked to the launchd agent** that serves its upstream: the row
+  then shows the service's state beside the upstream probe, and Start/Stop
+  actions drive it without leaving the screen. Below it,
   every name the machine declares (`/etc/hosts`, dnsmasq `address=`
   rules, `/etc/resolver/*`) probed two ways: system resolver vs dnsmasq.
   *Divergent* = something above dnsmasq (NextDNS, secure DNS, cache) is
@@ -43,7 +46,11 @@ time.
   launchd jobs, user and system domain, with state, last exit code, log
   tail, kickstart, and in-place plist **editing** for user agents (saves
   are `plutil`-linted before they replace the live file; system daemons
-  stay read-only with sudo steps).
+  stay read-only with sudo steps). Full lifecycle for user agents:
+  **Start/Stop** (bootstrap/bootout in the gui domain) and
+  **Enable/Disable** — disabling parks the plist under a `.disabled`
+  suffix (the convention the archive folders already use) so login skips
+  it, and disabled agents stay listed for one-click re-enable.
 - **DNS chain** — scoped resolvers, default upstream, NextDNS/dnsmasq
   liveness, and the practical order of authority.
 
@@ -61,7 +68,9 @@ npm start          # builds + serves http://127.0.0.1:4950 (loopback only)
 Persistent: the `am.danielk.dockmaster` launchd agent runs
 `server/index.mjs` with KeepAlive; logs in `~/.local/state/dockmaster/`.
 The ingress side needs the root daemon once:
-`sudo bash ~/ai/repos/dockmaster/deploy/install.sh`.
+`sudo bash <repo>/deploy/install.sh` — the UI prints the exact copyable
+command, derived from where the repo actually lives (the deploy scripts
+resolve their own location, so a repo move can't strand them again).
 
 ## Design notes
 

@@ -5,7 +5,7 @@ import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } fro
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 import { chevronLeft, menu } from '@wordpress/icons';
 
-const VERSION = '2.5.0';
+const VERSION = '2.6.0';
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -253,6 +253,30 @@ function PSDataView({ data, fields, actions = [], itemKey, perPage = 50, aiWhat,
 const DOMAIN_FIELDS = [
   { id: 'host', label: 'Domain', getValue: ({ item }) => item.host, render: ({ item }) => <a className="ps-mono" href={item.url} target="_blank" rel="noreferrer">{item.host}</a>, enableGlobalSearch: true },
   { id: 'port', label: 'Upstream', getValue: ({ item }) => item.port, aiValue: (item) => `127.0.0.1:${item.port}`, render: ({ item }) => <span className="ps-mono">127.0.0.1:{item.port}</span> },
+  {
+    id: 'service',
+    label: 'Service',
+    enableGlobalSearch: true,
+    getValue: ({ item }) => item.service || '',
+    aiValue: (item) => (
+      !item.service ? 'none linked'
+        : item.serviceState?.missing ? `${item.service} (agent missing)`
+        : item.serviceState?.disabled ? `${item.service} (disabled)`
+        : item.serviceState?.running ? `${item.service} (running)`
+        : `${item.service} (stopped)`
+    ),
+    render: ({ item }) => (
+      !item.service ? <span className="ps-mono">—</span> : (
+        <span className="ps-listeners">
+          <span className="ps-mono">{item.service}</span>
+          {item.serviceState?.missing ? <Chip tone="error">missing</Chip>
+            : item.serviceState?.disabled ? <Chip>disabled</Chip>
+            : item.serviceState?.running ? <Chip tone="success">running</Chip>
+            : <Chip tone="warning">stopped</Chip>}
+        </span>
+      )
+    ),
+  },
   { id: 'cert', label: 'Cert', getValue: ({ item }) => (item.cert ? 'minted' : 'missing'), render: ({ item }) => (item.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>) },
   { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, aiValue: (item) => (item.dns === 'ok' ? 'resolving' : 'pending apply'), render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
   { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, aiValue: (item) => (item.upstream === 'up' ? 'upstream up' : 'upstream down'), render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
@@ -291,15 +315,17 @@ const SERVICE_FIELDS = [
   {
     id: 'state',
     label: 'State',
-    getValue: ({ item }) => (item.running ? 2 : item.keepAlive ? 0 : 1),
+    getValue: ({ item }) => (item.disabled ? -1 : item.running ? 2 : item.keepAlive ? 0 : 1),
     aiValue: (item) => (
       item.domain === 'system' ? 'root — state needs sudo'
+        : item.disabled ? 'disabled (plist parked under a suffix; enable to use it)'
         : item.running ? `running (pid ${item.pid})`
         : item.keepAlive ? 'not running, but KeepAlive is set'
         : 'idle'
     ),
     render: ({ item }) => (
       item.domain === 'system' ? <Chip>root — state needs sudo</Chip>
+        : item.disabled ? <Chip>disabled</Chip>
         : item.running ? <Chip tone="success">running · pid {item.pid}</Chip>
         : <Chip tone={item.keepAlive ? 'error' : 'neutral'}>{item.keepAlive ? 'not running (KeepAlive!)' : 'idle'}</Chip>
     ),
@@ -333,16 +359,16 @@ const TLD_FIELDS = [
 // What each table holds, in the words the prompt uses — shared by the row
 // action and the section button so both frame the data the same way.
 const AI_WHAT = {
-  domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD)',
+  domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD; a domain can be linked to the launchd agent that serves its upstream, which Dockmaster can start and stop)',
   observed: 'the full list of local domain names this machine declares anywhere — /etc/hosts, dnsmasq rules, and /etc/resolver files — alongside what the system resolver and dnsmasq each answer, and which processes are listening on the address it resolves to',
   tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
-  services: 'the launchd agents I own on this machine (loaded, not disabled)',
+  services: 'the launchd agents I own on this machine, including disabled ones (their plist is parked under a .disabled suffix so login skips them)',
   dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
 };
 
 const AI_ROW_QUESTION = {
-  domains: 'What is this domain about — what is likely running on that upstream port, and does anything here look wrong (missing certificate, DNS not resolving yet, upstream down)?',
+  domains: 'What is this domain about — what is likely running on that upstream port, and does anything here look wrong (missing certificate, DNS not resolving yet, upstream down, or a linked service that should be started)?',
   observed: 'What is this entry about — what most likely created it, what would still depend on it, and would it be safe to remove? Flag it if the entry looks stale, or if the system resolver and dnsmasq disagree.',
   tlds: 'What is this suffix for, is its resolver file in place, and does anything look off — a vanity TLD with no sites, or a resolver file still pending a privileged apply?',
   ports: 'What is this process, and why would it be listening on this port? Tell me whether it is something a developer typically installs deliberately, what would break if I stopped it, and whether the port or bind address is a problem.',
@@ -357,14 +383,14 @@ async function machineSnapshot() {
   const [overview, ingress, observed, ports, services, dns] = await Promise.all([
     get('overview'), get('ingress'), get('domains'), get('ports'), get('launchd'), get('dns'),
   ]);
-  const mine = services.filter((j) => j.owned && !j.disabled);
+  const mine = services.filter((j) => j.owned);
   return aiPrompt({
     subject: 'Below is a full snapshot of the machine, taken from every view in Dockmaster.',
     body: [
       '## Summary',
       `Listening ports: ${overview.counts.ports}${overview.counts.sharedPorts ? ` (${overview.counts.sharedPorts} shared between processes)` : ''}`,
       `Local domains declared: ${overview.counts.domains}`,
-      `Launchd agents I own and have loaded: ${mine.length}, ${mine.filter((j) => j.running).length} running (the machine has ${overview.counts.services} launchd jobs in total, counting system and disabled ones)`,
+      `Launchd agents I own: ${mine.length}, ${mine.filter((j) => j.running).length} running, ${mine.filter((j) => j.disabled).length} disabled (the machine has ${overview.counts.services} launchd jobs in total, counting system ones)`,
       `DNS chain: ${[dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ')}`,
       `Ingress daemon: ${ingress.ingress.up ? `up on ${ingress.ingress.aliasIp} + ${ingress.ingress.aliasIp6}` : 'DOWN'}`,
       '',
@@ -444,6 +470,7 @@ function Ingress() {
   const [notice, setNotice] = useState(null);
   const [confirmHost, setConfirmHost] = useState(null);
   const [edit, setEdit] = useState(null); // { host, port }
+  const [svcEdit, setSvcEdit] = useState(null); // { host, service }
   const [ipEdit, setIpEdit] = useState(null); // { kind, name, key?, ip }
   const [resEdit, setResEdit] = useState(null); // { file, content, busy }
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
@@ -488,6 +515,33 @@ function Ingress() {
     } finally {
       setBusy(false);
     }
+  };
+  // Linked-service management: link/unlink writes the registry (no Caddy
+  // reload needed); start/stop drive launchctl through the same endpoints
+  // the Services screen uses, then re-probe so the upstream chip catches up.
+  const saveService = async () => {
+    setBusy(true);
+    try {
+      const r = await fetch(`/api/ingress/domains/${encodeURIComponent(svcEdit.host)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ service: svcEdit.service }),
+      }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
+      setNotice({ status: 'success', text: r.service ? `${r.host} is now backed by ${r.service}.` : `${r.host} has no linked service now.` });
+      setSvcEdit(null);
+      reload();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const svcAction = async (label, verb) => {
+    const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/${verb}`, { method: 'POST' }).then((x) => x.json());
+    setNotice(r.ok
+      ? { status: 'success', text: `${label} ${verb === 'start' ? 'started' : 'stopped'} — the upstream probe refreshes in a moment.` }
+      : { status: 'error', text: r.error || 'Failed.' });
+    setTimeout(reload, 900);
   };
   const refreshAll = () => { reload(); observed.reload(); staged.reload(); tlds.reload(); };
   // Observed-domain management: the underlying files are root-owned, so an
@@ -645,6 +699,9 @@ function Ingress() {
         fields={DOMAIN_FIELDS}
         actions={[
           { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port) }) },
+          { id: 'service-link', label: 'Link service…', callback: ([item]) => setSvcEdit({ host: item.host, service: item.service || '' }) },
+          { id: 'service-start', label: 'Start service', isEligible: (item) => !!item.service && !item.serviceState?.missing && !item.serviceState?.disabled && !item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'start') },
+          { id: 'service-stop', label: 'Stop service', isDestructive: true, isEligible: (item) => !!item.service && !!item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'stop') },
           { id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmHost(item.host) },
         ]}
         itemKey="host"
@@ -669,13 +726,35 @@ function Ingress() {
           <Button __next40pxDefaultSize variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
         </div>
       )}
+      {svcEdit && (
+        <div className="ps-addrow">
+          <div className="ps-suffixfield">
+            <input value={svcEdit.host} disabled />
+            <span>backed by</span>
+          </div>
+          <select
+            className="ps-suffix-select"
+            autoFocus
+            aria-label="Launchd agent"
+            value={svcEdit.service}
+            onChange={(e) => setSvcEdit({ ...svcEdit, service: e.target.value })}
+          >
+            <option value="">— no service —</option>
+            {[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])].sort().map((l) => (
+              <option key={l} value={l}>{l}</option>
+            ))}
+          </select>
+          <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
+          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
+        </div>
+      )}
       {confirmHost && (
         <PSNotice status="warning" onRemove={() => setConfirmHost(null)} spokenMessage={`Remove ${confirmHost} — site block and cert?`}>
           Remove {confirmHost} (site block + cert)?{' '}
           <Button size="small" variant="primary" isDestructive onClick={() => remove(confirmHost)}>Remove it</Button>
         </PSNotice>
       )}
-      <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above.</Text>
+      <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above. Link a domain to one of your launchd agents and its upstream can be started and stopped right from this table.</Text>
 
       <div className="ps-subhead-row">
         <h3 className="ps-subhead ps-subhead--flush">All observed local domains</h3>
@@ -946,7 +1025,10 @@ function Services() {
   const [notice, setNotice] = useState(null);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
-  const rows = data.filter((j) => j.owned && !j.disabled).map((j) => ({ ...j, _k: `${j.domain}:${j.label}` }));
+  // Disabled agents (plist parked under a .disabled suffix) list too, so they
+  // can be re-enabled from here. Keyed by file: a parked copy can coexist
+  // with a live plist carrying the same label.
+  const rows = data.filter((j) => j.owned).map((j) => ({ ...j, _k: j.file }));
   const showFile = async (label, kind) => {
     setEditor(null);
     const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/${kind}`).then((x) => x.json());
@@ -979,11 +1061,24 @@ function Services() {
     setNotice(r.ok ? { status: 'success', text: `${label} kickstarted.` } : { status: 'error', text: r.error || r.stderr || 'Failed.' });
     reload();
   };
+  // Lifecycle: start/stop load and unload the agent now; disable/enable park
+  // and unpark its plist (a .disabled suffix) so login skips or runs it.
+  const lifecycle = async (label, verb) => {
+    const r = await fetch(`/api/launchd/${encodeURIComponent(label)}/${verb}`, { method: 'POST' }).then((x) => x.json());
+    setNotice(r.ok
+      ? { status: 'success', text: `${label}: ${verb} done.${r.note ? ` ${r.note}` : ''}` }
+      : { status: 'error', text: r.error || 'Failed.' });
+    setTimeout(reload, 700);
+  };
   const actions = [
+    { id: 'start', label: 'Start', callback: ([item]) => lifecycle(item.label, 'start'), isEligible: (item) => item.domain === 'user' && !item.disabled && !item.running },
+    { id: 'stop', label: 'Stop', isDestructive: true, callback: ([item]) => lifecycle(item.label, 'stop'), isEligible: (item) => item.domain === 'user' && !!item.running },
+    { id: 'enable', label: 'Enable', callback: ([item]) => lifecycle(item.label, 'enable'), isEligible: (item) => item.domain === 'user' && item.disabled },
+    { id: 'disable', label: 'Disable', isDestructive: true, callback: ([item]) => lifecycle(item.label, 'disable'), isEligible: (item) => item.domain === 'user' && !item.disabled },
     { id: 'log', label: 'Log', callback: ([item]) => showFile(item.label, 'log'), isEligible: (item) => !!item.log },
     { id: 'edit', label: 'Edit plist', callback: ([item]) => openEditor(item.label), isEligible: (item) => item.domain === 'user' },
     { id: 'plist', label: 'View plist', callback: ([item]) => showFile(item.label, 'plist'), isEligible: (item) => item.domain !== 'user' },
-    { id: 'kickstart', label: 'Kickstart', callback: ([item]) => kick(item.label), isEligible: (item) => item.domain === 'user' },
+    { id: 'kickstart', label: 'Kickstart', callback: ([item]) => kick(item.label), isEligible: (item) => item.domain === 'user' && !item.disabled },
   ];
   const sectionPrompt = () => aiPrompt({
     subject: `Below, from Dockmaster: ${AI_WHAT.services}.`,
@@ -1009,6 +1104,7 @@ function Services() {
         aiWhat={AI_WHAT.services}
         aiQuestion={AI_ROW_QUESTION.services}
       />
+      <Text className="ps-hint">Start and Stop load and unload an agent now. Disable parks its plist under a <span className="ps-mono">.disabled</span> suffix so login skips it; Enable unparks and loads it again. System daemons stay read-only here.</Text>
       {panel && (
         <div className="ps-log">
           <div className="ps-log__head">

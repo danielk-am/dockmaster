@@ -6,7 +6,7 @@
 import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, rename } from 'node:fs/promises';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
@@ -34,6 +34,12 @@ const HOME = homedir();
 const UID = process.getuid();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appVersion = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+
+// Every sudo command the UI hands out is derived from where this repo
+// actually lives: the hardcoded ~/ai/repos/dockmaster path went stale when
+// the repo moved to ~/os/danielk-am/repos/local in the July 2026 reorg.
+const REPO = path.resolve(__dirname, '..');
+const sudoCommand = (script) => `sudo bash ${path.join(REPO, 'deploy', script).replace(HOME, '~')}`;
 
 const run = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
@@ -151,9 +157,12 @@ async function listLaunchd() {
     let files = [];
     try { files = await readdir(dir); } catch { return; }
     for (const f of files) {
-      if (!f.endsWith('.plist')) continue;
+      // foo.plist is live; foo.plist.disabled / .retired-… is parked — launchd
+      // skips it at login, but it still lists here so it can be re-enabled.
+      const m = f.match(/^(.+\.plist)(\.[A-Za-z0-9._-]+)?$/);
+      if (!m) continue;
       const meta = await plistToJson(path.join(dir, f));
-      const label = meta?.Label || f.replace(/\.plist$/, '');
+      const label = meta?.Label || m[1].replace(/\.plist$/, '');
       out.push({
         label,
         domain,
@@ -163,7 +172,7 @@ async function listLaunchd() {
         runAtLoad: !!meta?.RunAtLoad,
         interval: meta?.StartInterval || null,
         log: meta?.StandardOutPath || null,
-        disabled: f.includes('.disabled') || f.includes('.retired'),
+        disabled: !!m[2],
       });
     }
   };
@@ -234,20 +243,33 @@ async function ingressState() {
   const reg = readRegistry();
   const pending = refreshDnsPending();
   const ingressUp = await tcpProbe(ALIAS_IP, 443);
+  // One launchd snapshot serves every row's linked-service state plus the
+  // list of linkable agents for the UI's picker.
+  const jobs = (await listLaunchd()).filter((j) => j.domain === 'user');
+  const agentFor = (label) => jobs.find((j) => j.label === label) || null;
   const domains = await Promise.all(
-    reg.domains.map(async (d) => ({
-      ...d,
-      cert: existsSync(path.join(CERTS, `${d.host}.pem`)),
-      dns: await ingressDnsState(d.host),
-      upstream: (await tcpProbe('127.0.0.1', d.port)) ? 'up' : 'down',
-      url: `https://${d.host}`,
-    }))
+    reg.domains.map(async (d) => {
+      const agent = d.service ? agentFor(d.service) : null;
+      return {
+        ...d,
+        cert: existsSync(path.join(CERTS, `${d.host}.pem`)),
+        dns: await ingressDnsState(d.host),
+        upstream: (await tcpProbe('127.0.0.1', d.port)) ? 'up' : 'down',
+        url: `https://${d.host}`,
+        serviceState: d.service
+          ? agent
+            ? { running: !!agent.running, pid: agent.pid, disabled: agent.disabled, lastExit: agent.lastExit }
+            : { missing: true }
+          : null,
+      };
+    })
   );
   return {
     ingress: { up: ingressUp, aliasIp: ALIAS_IP, aliasIp6: ALIAS_IP6 },
     dnsPending: pending,
-    applyDnsCommand: 'sudo bash ~/ai/repos/dockmaster/deploy/apply-dns.sh',
-    installCommand: 'sudo bash ~/ai/repos/dockmaster/deploy/install.sh',
+    applyDnsCommand: sudoCommand('apply-dns.sh'),
+    installCommand: sudoCommand('install.sh'),
+    agents: jobs.filter((j) => j.owned && !j.disabled).map((j) => j.label).sort(),
     domains,
   };
 }
@@ -294,22 +316,41 @@ app.post('/api/ingress/domains', async (req, res) => {
   res.json({ ok: true, host });
 });
 
-// Edit = repoint an existing domain at a different upstream port. The host
-// (and so its cert and DNS lines) is unchanged — the registry write plus
-// regenerate is the whole job, applied live by the watching daemon.
-app.patch('/api/ingress/domains/:host', (req, res) => {
+// Edit = repoint an existing domain at a different upstream port, and/or
+// link/unlink the launchd agent that backs it. The host (and so its cert
+// and DNS lines) is unchanged; only a port change touches the Caddy config,
+// so only that path regenerates and reloads the watching daemon.
+app.patch('/api/ingress/domains/:host', async (req, res) => {
   const host = String(req.params.host).toLowerCase();
-  const port = Number(req.body?.port);
-  if (!Number.isInteger(port) || port < 1 || port > 65535) {
-    return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
-  }
   const reg = readRegistry();
   const entry = reg.domains.find((d) => d.host === host);
   if (!entry) return res.status(404).json({ error: 'Not registered.' });
-  entry.port = port;
+  const wantsPort = req.body?.port !== undefined;
+  const wantsService = req.body?.service !== undefined;
+  if (!wantsPort && !wantsService) return res.status(400).json({ error: 'Nothing to change.' });
+  if (wantsPort) {
+    const port = Number(req.body.port);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) {
+      return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
+    }
+    entry.port = port;
+  }
+  if (wantsService) {
+    const service = String(req.body.service || '').trim();
+    if (!service) {
+      delete entry.service;
+    } else {
+      if (!OWNED.test(service)) {
+        return res.status(400).json({ error: 'Only your own am.danielk./com.danielkam./dev.1dr0. agents can back a domain.' });
+      }
+      const job = (await listLaunchd()).find((j) => j.label === service && j.domain === 'user');
+      if (!job) return res.status(404).json({ error: `No user agent labelled ${service}.` });
+      entry.service = service;
+    }
+  }
   writeRegistry(reg);
-  regenerate();
-  res.json({ ok: true, host, port });
+  if (wantsPort) regenerate();
+  res.json({ ok: true, host, port: entry.port, service: entry.service ?? null });
 });
 
 app.delete('/api/ingress/domains/:host', (req, res) => {
@@ -334,7 +375,7 @@ app.delete('/api/ingress/domains/:host', (req, res) => {
 const EDITS_FILE = path.join(HOME, '.local/share/local-ingress/observed-edits.json');
 const readEdits = () => { try { return JSON.parse(readFileSync(EDITS_FILE, 'utf8')); } catch { return []; } };
 const writeEdits = (edits) => writeFileSync(EDITS_FILE, JSON.stringify(edits, null, 2) + '\n');
-const APPLY_EDITS_COMMAND = 'sudo bash ~/ai/repos/dockmaster/deploy/apply-edits.sh';
+const APPLY_EDITS_COMMAND = sudoCommand('apply-edits.sh');
 
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
 const IP_RE = /^((\d{1,3}\.){3}\d{1,3}|[0-9a-f:]+)$/i;
@@ -614,6 +655,73 @@ app.put('/api/launchd/:label/plist', async (req, res) => {
   }
   await rename(tmp, job.file);
   res.json({ ok: true, path: job.file });
+});
+
+// ---------------------------------------------------- service lifecycle ----
+// Start/stop load and unload a user agent in the gui domain; enable/disable
+// park the plist under a .disabled suffix (the filename convention already
+// used across ~/Library/LaunchAgents) so login skips it. Owned user agents
+// only — system daemons stay sudo-in-a-terminal territory.
+
+const lifecycleJob = async (label, res) => {
+  if (!OWNED.test(label)) {
+    res.status(403).json({ error: 'Only your own am.danielk./com.danielkam./dev.1dr0. agents can be managed.' });
+    return null;
+  }
+  const job = (await listLaunchd()).find((j) => j.label === label && j.domain === 'user');
+  if (!job) {
+    res.status(404).json({ error: 'Not a user-domain agent (system daemons need sudo in a terminal).' });
+    return null;
+  }
+  return job;
+};
+
+app.post('/api/launchd/:label/start', async (req, res) => {
+  const job = await lifecycleJob(req.params.label, res);
+  if (!job) return;
+  if (job.disabled) return res.status(409).json({ error: 'Disabled — enable it first.' });
+  // Bootstrap if launchd doesn't know the label yet; kickstart (no -k, so a
+  // running instance is left alone) if it does.
+  const loaded = (await run('launchctl', ['print', `gui/${UID}/${job.label}`])).ok;
+  const r = loaded
+    ? await run('launchctl', ['kickstart', `gui/${UID}/${job.label}`])
+    : await run('launchctl', ['bootstrap', `gui/${UID}`, job.file]);
+  if (!r.ok) return res.status(500).json({ error: (r.stderr || r.stdout || 'launchctl failed.').trim().slice(0, 300) });
+  res.json({ ok: true });
+});
+
+app.post('/api/launchd/:label/stop', async (req, res) => {
+  const job = await lifecycleJob(req.params.label, res);
+  if (!job) return;
+  const r = await run('launchctl', ['bootout', `gui/${UID}/${job.label}`]);
+  // Booting out an already-unloaded job is a no-op, not a failure.
+  if (!r.ok && !/no such process/i.test(r.stderr)) {
+    return res.status(500).json({ error: (r.stderr || 'launchctl failed.').trim().slice(0, 300) });
+  }
+  res.json({ ok: true, note: 'Unloaded — RunAtLoad brings it back at next login unless you disable it.' });
+});
+
+app.post('/api/launchd/:label/disable', async (req, res) => {
+  const job = await lifecycleJob(req.params.label, res);
+  if (!job) return;
+  if (job.disabled) return res.status(409).json({ error: 'Already disabled.' });
+  if (!plistEditable(job)) return res.status(403).json({ error: 'Only user agents under ~/Library/LaunchAgents can be disabled here.' });
+  await run('launchctl', ['bootout', `gui/${UID}/${job.label}`]); // best-effort
+  const parked = `${job.file}.disabled`;
+  await rename(job.file, parked);
+  res.json({ ok: true, file: parked });
+});
+
+app.post('/api/launchd/:label/enable', async (req, res) => {
+  const job = await lifecycleJob(req.params.label, res);
+  if (!job) return;
+  if (!job.disabled) return res.status(409).json({ error: 'Already enabled.' });
+  if (!plistEditable(job)) return res.status(403).json({ error: 'Only user agents under ~/Library/LaunchAgents can be enabled here.' });
+  const live = job.file.replace(/(\.plist)\.[A-Za-z0-9._-]+$/, '$1');
+  if (existsSync(live)) return res.status(409).json({ error: `${path.basename(live)} already exists — resolve the duplicate first.` });
+  await rename(job.file, live);
+  const r = await run('launchctl', ['bootstrap', `gui/${UID}`, live]);
+  res.json({ ok: true, started: r.ok, file: live });
 });
 
 app.use(express.static(path.join(__dirname, '..', 'dist')));
