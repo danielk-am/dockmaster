@@ -1,4 +1,4 @@
-# Dockmaster ⚓
+# Dockmaster
 
 The local dev infrastructure control plane for one Mac: every listening
 port and who owns it, every local domain and what it *actually* resolves
@@ -15,8 +15,10 @@ time.
 
 ## Views
 
-- **Overview** — counts + a warning when NextDNS is sitting above your
-  scoped resolvers.
+- **Overview** — a rotating, fixed-height orientation hero followed by three
+  stacked Quick Start journeys and the live machine snapshot. Reduced-motion
+  mode keeps the first hero variant. Journeys lead into domain setup, port
+  investigation, and service recovery without replacing the underlying tools.
 - **Ingress & Domains** — the one screen that views AND manages domains.
   Managed domains live in the registry (`~/.local/share/local-ingress/`):
   add (bare name, `.test` is the fixed suffix), change upstream port, or
@@ -83,3 +85,47 @@ staged and handed to you as a copyable sudo command.
 React + `@wordpress/components` + `@wordpress/dataviews` frontend,
 WordPress Design Language, Blueberry accent, system | light | dark theme
 triad — same mold as the Snippet Manager for Espanso.
+
+## Family shell
+
+Dockmaster uses the flush standalone WPDS family shell. Default app, sidebar,
+and content surfaces are white. The left panel has a fixed identity header and
+local-profile footer, with one scrollable body between them. Its width persists
+independently from collapse and uses the shared `@1dr0/ai-chat` 0.7.1 short
+resize handle on the panel's right edge.
+
+Main navigation appears before the utility stack. Utilities stay in the shared
+order: **Ask Dockmaster**, **Help & Feedback**, then **App settings**. Active
+navigation uses background and weight, never a left stripe. Authored dropdowns
+use the shared `PopoverSelect`; native select menus are not part of the app UI.
+
+The generated 36px product mark and 28px local-operator avatar use
+`@1dr0/wpds-identity` with stable, non-secret seeds and no external image
+request. Optional generated logo explorations remain in `public/` as static
+assets. Runtime identity stays deterministic.
+
+README remains repository documentation and is not rendered as a web link
+because the loopback host does not serve repository Markdown. Dockmaster has a
+private loopback service API for its interface, but it does not claim a public
+API Reference or MCP server, so the shell does not fabricate those links.
+
+## Ask AI and host boundary
+
+Dockmaster includes the shared `@1dr0/ai-chat` panel. It receives a redacted,
+bounded snapshot of the current section and can navigate between sections. It
+has no infrastructure mutation tools.
+
+Default `public/ai-chat-config.js` mode is direct. Direct Anthropic keys stay in
+page memory. `server/ai-bridge-config.mjs` provides the same-origin relay
+registry for a host that wires Dockmaster to the Claude-a8c, Gemini-a8c, or
+ChatGPT-a8c bridges. Bridge credentials belong in the server process; browser
+configuration carries only endpoints, provider names, and model lists.
+
+Dockmaster has no account system. Its loopback server is the owner boundary. A
+shared or non-owner host must add authentication and per-user provider
+credentials before enabling an assistant route. Browser requests cannot choose
+an upstream or assert owner status.
+
+Vendored packages are refreshed from UI Playground with `npm pack`, then
+installed from `vendor/1dr0-ai-chat-0.7.1.tgz` and
+`vendor/1dr0-wpds-identity-0.1.0.tgz`.

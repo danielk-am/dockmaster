@@ -3,7 +3,11 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
-import { chevronLeft, menu } from '@wordpress/icons';
+import { chevronLeft, cog, commentContent, help, menu } from '@wordpress/icons';
+import { AiChatResizeHandle, PopoverSelect } from '@1dr0/ai-chat';
+import { generatedIdentityImage } from '@1dr0/wpds-identity';
+import '@1dr0/wpds-identity/styles.css';
+import AssistantPanel from './AssistantPanel.jsx';
 
 const VERSION = '2.6.0';
 
@@ -14,6 +18,24 @@ const NAV = [
   { id: 'ports', label: 'Ports' },
   { id: 'services', label: 'Services' },
   { id: 'dns', label: 'DNS chain' },
+];
+
+const OVERVIEW_HEROES = [
+  {
+    kicker: 'SEE THE WHOLE LOCAL PATH',
+    title: 'Know which service owns an address before you change anything.',
+    support: 'Dockmaster connects local domains, ports, launchd services, and DNS into one inspectable path.',
+  },
+  {
+    kicker: 'WORK FROM EVIDENCE',
+    title: 'Trace the request from name resolution to the process answering it.',
+    support: 'Start with the symptom, follow each layer, then use the narrow control that owns the fix.',
+  },
+  {
+    kicker: 'KEEP LOCAL INFRASTRUCTURE RECOVERABLE',
+    title: 'Review state first, stage changes, and keep privileged work bounded.',
+    support: 'The interface separates observation, user-owned changes, and validated privileged application.',
+  },
 ];
 
 const get = (p) => fetch(`/api/${p}`).then((r) => r.json());
@@ -38,6 +60,20 @@ const THEMES = ['system', 'light', 'dark'];
 // floating reveal button at the same y position, rather than shrinking to an
 // icons-only rail that would have nothing to show.
 const SIDEBAR_KEY = 'dockmaster-sidebar-collapsed';
+const SIDEBAR_WIDTH_KEY = 'dockmaster-sidebar-width';
+const SIDEBAR_WIDTH_MIN = 208;
+const SIDEBAR_WIDTH_MAX = 360;
+const SIDEBAR_WIDTH_DEFAULT = 232;
+
+const boundSidebarWidth = (value) =>
+  Math.min(
+    SIDEBAR_WIDTH_MAX,
+    Math.max(SIDEBAR_WIDTH_MIN, Number(value) || SIDEBAR_WIDTH_DEFAULT)
+  );
+
+function readSidebarWidth() {
+  return boundSidebarWidth(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+}
 
 function useTheme() {
   const [pref, setPref] = useState(() => {
@@ -416,9 +452,19 @@ async function machineSnapshot() {
 
 function Overview({ go }) {
   const { data, error, reload } = useApi('overview');
+  const [hero, setHero] = useState(0);
+  useEffect(() => {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const timer = window.setInterval(
+      () => setHero((value) => (value + 1) % OVERVIEW_HEROES.length),
+      7000
+    );
+    return () => window.clearInterval(timer);
+  }, []);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const { counts, dns } = data;
+  const heroCopy = OVERVIEW_HEROES[hero];
   const cards = [
     { id: 'ports', label: 'Listening ports', value: counts.ports, sub: counts.sharedPorts ? `${counts.sharedPorts} shared between processes` : 'no shared ports' },
     { id: 'ingress', label: 'Local domains', value: counts.domains, sub: 'hosts, dnsmasq, resolver files' },
@@ -426,28 +472,74 @@ function Overview({ go }) {
     { id: 'dns', label: 'DNS layers', value: (dns.nextdns ? 1 : 0) + (dns.dnsmasq ? 1 : 0) + 1, sub: [dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ') },
   ];
   return (
-    <Section
-      title="Overview"
-      actions={
-        <>
-          <CopyForAI build={machineSnapshot} what="the whole machine (ports, domains, agents, DNS)" label="Copy machine for AI" />
-          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
-        </>
-      }
-    >
-      {dns.nextdns && (
-        <PSNotice status="warning" isDismissible={false}>
-          NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
-        </PSNotice>
-      )}
-      <div className="ps-cards">
-        {cards.map((c) => (
-          <button key={c.id} className="ps-statcard" onClick={() => go(c.id)}>
-            <span className="ps-statcard__value">{c.value}</span>
-            <span className="ps-statcard__label">{c.label}</span>
-            <span className="ps-statcard__sub">{c.sub}</span>
-          </button>
-        ))}
+    <div className="ps-overview">
+      <section className="ps-overview__hero" aria-live="polite">
+        <p className="ps-overview__kicker">{heroCopy.kicker}</p>
+        <h1>{heroCopy.title}</h1>
+        <p>{heroCopy.support}</p>
+      </section>
+      <section className="ps-quick-start" aria-labelledby="ps-quick-start-title">
+        <h2 id="ps-quick-start-title">Quick Start</h2>
+        <button type="button" className="ps-journey is-primary" onClick={() => go('ingress')}>
+          <span className="ps-journey__number">01</span>
+          <span><strong>Connect a local address</strong><small>Register its domain and verify the route.</small></span>
+          <span aria-hidden="true">›</span>
+        </button>
+        <button type="button" className="ps-journey" onClick={() => go('ports')}>
+          <span className="ps-journey__number">02</span>
+          <span><strong>Investigate a port collision</strong><small>See every listener, ownership boundary, and shared binding before acting.</small></span>
+          <span aria-hidden="true">›</span>
+        </button>
+        <button type="button" className="ps-journey" onClick={() => go('services')}>
+          <span className="ps-journey__number">03</span>
+          <span><strong>Restore a local service</strong><small>Check state and logs, then use the narrow lifecycle action for that agent.</small></span>
+          <span aria-hidden="true">›</span>
+        </button>
+      </section>
+      <Section
+        title="Machine snapshot"
+        actions={
+          <>
+            <CopyForAI build={machineSnapshot} what="the whole machine (ports, domains, agents, DNS)" label="Copy machine for AI" />
+            <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+          </>
+        }
+      >
+        {dns.nextdns && (
+          <PSNotice status="warning" isDismissible={false}>
+            NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
+          </PSNotice>
+        )}
+        <div className="ps-cards">
+          {cards.map((c) => (
+            <button key={c.id} className="ps-statcard" onClick={() => go(c.id)}>
+              <span className="ps-statcard__value">{c.value}</span>
+              <span className="ps-statcard__label">{c.label}</span>
+              <span className="ps-statcard__sub">{c.sub}</span>
+            </button>
+          ))}
+        </div>
+      </Section>
+    </div>
+  );
+}
+
+function HelpPage() {
+  return (
+    <Section title="Help & Feedback">
+      <p>Start on Overview, choose the task that matches the symptom, then follow the linked inspection pages.</p>
+      <p className="ps-hint">Repository setup, recovery, and operating notes live in README.md.</p>
+    </Section>
+  );
+}
+
+function SettingsPage({ themePref, onThemeChange }) {
+  return (
+    <Section title="App settings">
+      <div className="ps-settings-group">
+        <strong>Appearance</strong>
+        <span className="ps-hint">Use the saved local preference or follow the system appearance.</span>
+        <ThemeSwitch pref={themePref} onChange={onThemeChange} />
       </div>
     </Section>
   );
@@ -672,11 +764,17 @@ function Ingress() {
             onChange={(e) => setName(e.target.value.toLowerCase().replace(new RegExp(`\\.${tld}$`), ''))}
             onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
           />
-          <select className="ps-suffix-select" value={tld} aria-label="TLD" onChange={(e) => setTld(e.target.value)}>
-            {(tlds.data?.tlds?.map((t) => t.tld) || ['test']).map((t) => (
-              <option key={t} value={t}>.{t}</option>
-            ))}
-          </select>
+          <PopoverSelect
+            className="ps-suffix-select"
+            label="TLD"
+            hideLabelFromVision
+            value={tld}
+            options={(tlds.data?.tlds?.map((item) => item.tld) || ['test']).map((item) => ({
+              value: item,
+              label: `.${item}`,
+            }))}
+            onChange={setTld}
+          />
         </div>
         <input
           className="ps-search ps-portinput"
@@ -732,18 +830,20 @@ function Ingress() {
             <input value={svcEdit.host} disabled />
             <span>backed by</span>
           </div>
-          <select
+          <PopoverSelect
             className="ps-suffix-select"
             autoFocus
-            aria-label="Launchd agent"
+            label="Launchd agent"
+            hideLabelFromVision
             value={svcEdit.service}
-            onChange={(e) => setSvcEdit({ ...svcEdit, service: e.target.value })}
-          >
-            <option value="">— no service —</option>
-            {[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])].sort().map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
+            options={[
+              { value: '', label: '— no service —' },
+              ...[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])]
+                .sort()
+                .map((label) => ({ value: label, label })),
+            ]}
+            onChange={(service) => setSvcEdit({ ...svcEdit, service })}
+          />
           <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
           <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
         </div>
@@ -1183,7 +1283,7 @@ function Dns() {
 // absorbed into /ingress; the old slug keeps working.
 const SLUG_ALIASES = { domains: 'ingress' };
 function usePath() {
-  const valid = NAV.map((n) => n.id);
+  const valid = [...NAV.map((n) => n.id), 'help', 'settings'];
   const fromLocation = () => {
     const raw = window.location.pathname.replace(/^\/+/, '') || 'overview';
     const slug = SLUG_ALIASES[raw] || raw;
@@ -1209,11 +1309,18 @@ export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
   const [notices, setNotices] = useState([]);
-  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, dns: Dns }[page];
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, dns: Dns, help: HelpPage, settings: SettingsPage }[page];
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
+  const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
   const setSidebarCollapsed = useCallback((v) => {
     setSidebarCollapsedState(v);
     localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0');
+  }, []);
+  const setSidebarWidth = useCallback((value) => {
+    const next = boundSidebarWidth(value);
+    setSidebarWidthState(next);
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
   }, []);
   const dismiss = useCallback((id) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback((content, status = 'success') => {
@@ -1227,34 +1334,52 @@ export default function App() {
       {sidebarCollapsed && (
         <Button className="ps-sidebar-expand" icon={menu} label="Show sidebar" showTooltip onClick={() => setSidebarCollapsed(false)} />
       )}
-      <aside className="ps-sidebar">
-        <Button
-          className="ps-sidebar-collapse"
-          icon={chevronLeft}
-          label="Collapse sidebar"
-          showTooltip
-          onClick={() => setSidebarCollapsed(true)}
+      <aside className="ps-sidebar" style={{ '--ps-sidebar-width': `${sidebarWidth}px` }}>
+        <AiChatResizeHandle
+          className="ps-sidebar__resize"
+          value={sidebarWidth}
+          min={SIDEBAR_WIDTH_MIN}
+          max={SIDEBAR_WIDTH_MAX}
+          onValueChange={setSidebarWidth}
+          edge="right"
+          label="Resize Dockmaster sidebar"
         />
-        <div className="ps-brand">
-          <span className="ps-brand__mark">⚓</span>
-          <div>
-            <strong>Dockmaster</strong>
-            <span className="ps-brand__sub">local dev infrastructure</span>
+        <header className="ps-sidebar__header">
+          <Button className="ps-sidebar-collapse" icon={chevronLeft} label="Collapse sidebar" showTooltip onClick={() => setSidebarCollapsed(true)} />
+          <button type="button" className="ps-brand" aria-label="Go to Dockmaster overview" onClick={() => setPage('overview')}>
+            <img className="ps-brand__mark wpds-identity-image is-mark" src={generatedIdentityImage('mark', 'Dockmaster')} alt="" />
+            <span><strong>Dockmaster</strong><span className="ps-brand__sub">local dev infrastructure</span></span>
+          </button>
+        </header>
+        <div className="ps-sidebar__body">
+          <nav className="ps-nav" aria-label="Main navigation">
+            {NAV.map((n) => (
+              <button key={n.id} className={page === n.id ? 'is-active' : ''} aria-current={page === n.id ? 'page' : undefined} onClick={() => setPage(n.id)}>{n.label}</button>
+            ))}
+          </nav>
+          <div className="ps-sidebar__utilities">
+            <Button className="ps-utility ps-utility--ask" icon={commentContent} isPressed={assistantOpen} onClick={() => setAssistantOpen((open) => !open)}>Ask Dockmaster</Button>
+            <Button className={`ps-utility${page === 'help' ? ' is-active' : ''}`} icon={help} onClick={() => setPage('help')}>Help &amp; Feedback</Button>
+            <Button className={`ps-utility${page === 'settings' ? ' is-active' : ''}`} icon={cog} onClick={() => setPage('settings')}>App settings</Button>
           </div>
         </div>
-        <nav className="ps-nav">
-          {NAV.map((n) => (
-            <button key={n.id} className={page === n.id ? 'is-active' : ''} onClick={() => setPage(n.id)}>{n.label}</button>
-          ))}
-        </nav>
-        <div className="ps-sidebar__footer">
+        <footer className="ps-sidebar__footer">
+          <div className="ps-local-profile"><img className="ps-local-profile__avatar wpds-identity-image is-avatar" src={generatedIdentityImage('avatar', 'Dockmaster local operator')} alt="" /><span><small>Local profile</small><strong>Local operator</strong></span></div>
           <ThemeSwitch pref={themePref} onChange={setThemePref} />
           <span>Dockmaster v{VERSION}</span>
-        </div>
+        </footer>
       </aside>
       <main className="ps-main">
-        <Page go={setPage} />
+        <Page go={setPage} themePref={themePref} onThemeChange={setThemePref} />
       </main>
+      {assistantOpen && (
+        <AssistantPanel
+          page={page}
+          appearance={themePref}
+          onNavigate={setPage}
+          onClose={() => setAssistantOpen(false)}
+        />
+      )}
       <div className="ps-notices">
         <SnackbarList notices={notices} onRemove={dismiss} />
       </div>
