@@ -1,0 +1,45 @@
+services:
+  node-mcp-fixture:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: dockmaster-node-mcp-fixture:${NODE_MCP_IMAGE_TAG:-local}
+    init: true
+    user: "1000:1000"
+    environment:
+      NODE_ENV: production
+      NODE_MCP_HOST: 0.0.0.0
+      NODE_MCP_PORT: "8787"
+      NODE_MCP_BEARER_SECRET: ${NODE_MCP_BEARER_SECRET:?set NODE_MCP_BEARER_SECRET}
+      NODE_MCP_ALLOWED_HOSTS: ${NODE_MCP_ALLOWED_HOSTS:-127.0.0.1,localhost,node-mcp-fixture}
+      NODE_MCP_ALLOWED_ORIGINS: ${NODE_MCP_ALLOWED_ORIGINS:?set NODE_MCP_ALLOWED_ORIGINS}
+    ports:
+      - "127.0.0.1:${NODE_MCP_HOST_PORT:-18787}:8787"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 256m
+    cpus: 0.5
+    restart: unless-stopped
+    stop_grace_period: 10s
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8787/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 3s
+    logging:
+      driver: local
+      options:
+        max-size: 5m
+        max-file: "2"
+    networks:
+      - node-mcp
+
+networks:
+  node-mcp: {}
