@@ -159,6 +159,14 @@ body {
 }
 .ps-search:focus { outline: none; border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
 
+.ps-remote-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.ps-remote-actions button {
+	appearance: none; border: 1px solid var(--ps-border); border-radius: 999px; padding: 3px 8px;
+	background: var(--ps-surface); color: var(--ps-text); font: inherit; font-size: 10px; cursor: pointer;
+}
+.ps-remote-actions button:hover:not(:disabled) { border-color: var(--ps-accent); color: var(--ps-accent); }
+.ps-remote-actions button:disabled { opacity: 0.45; cursor: not-allowed; }
+
 .ps-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 20px; }
 .ps-statcard {
 	appearance: none; border: 1px solid var(--ps-border); background: var(--ps-surface); border-radius: 8px;
@@ -177,6 +185,7 @@ body {
 .ps-right { text-align: right; }
 .ps-right .components-button { margin-left: 6px; }
 .ps-mono { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
+.ps-cell-detail { display: block; margin-top: 2px; color: var(--ps-muted); }
 
 .ps-chip {
 	display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px; font-weight: 600;

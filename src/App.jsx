@@ -13,6 +13,7 @@ const NAV = [
   { id: 'tlds', label: 'Vanity TLDs' },
   { id: 'ports', label: 'Ports' },
   { id: 'services', label: 'Services' },
+  { id: 'remote', label: 'Remote services' },
   { id: 'dns', label: 'DNS chain' },
 ];
 
@@ -333,6 +334,68 @@ const SERVICE_FIELDS = [
   { id: 'lastExit', label: 'Last exit', getValue: ({ item }) => item.lastExit ?? '', render: ({ item }) => <span className="ps-mono">{item.lastExit ?? '—'}</span> },
 ];
 
+const REMOTE_SERVICE_FIELDS = [
+  {
+    id: 'service',
+    label: 'Service',
+    enableGlobalSearch: true,
+    getValue: ({ item }) => `${item.projectId} ${item.name} ${item.containerProject}`,
+    render: ({ item }) => (
+      <span>
+        <strong>{item.name}</strong>
+        <span className="ps-cell-detail ps-mono">{item.projectId} · {item.containerProject}</span>
+      </span>
+    ),
+  },
+  {
+    id: 'state',
+    label: 'State',
+    getValue: ({ item }) => item.state,
+    render: ({ item }) => {
+      const tone = item.state === 'running' ? 'success' : item.state === 'mixed' ? 'warning' : item.state === 'exited' || item.state === 'missing' ? 'error' : 'neutral';
+      return <Chip tone={tone}>{item.state}</Chip>;
+    },
+  },
+  {
+    id: 'health',
+    label: 'Health',
+    getValue: ({ item }) => item.health || 'not declared',
+    render: ({ item }) => {
+      const tone = item.health === 'healthy' ? 'success' : item.health === 'unhealthy' ? 'error' : item.health === 'mixed' || item.health === 'starting' ? 'warning' : 'neutral';
+      return <Chip tone={tone}>{item.health || 'not declared'}</Chip>;
+    },
+  },
+  { id: 'image', label: 'Image', getValue: ({ item }) => item.image || 'none', render: ({ item }) => <span className="ps-mono">{item.image || 'none'}</span>, enableGlobalSearch: true },
+  {
+    id: 'ports',
+    label: 'Published ports',
+    enableSorting: false,
+    getValue: ({ item }) => item.ports.map((port) => `${port.hostIp || '*'}:${port.hostPort || '-'} to ${port.containerPort}/${port.protocol}`).join(', '),
+    render: ({ item }) => item.ports.length
+      ? <span className="ps-listeners">{item.ports.map((port, index) => <span key={`${port.containerPort}-${index}`} className="ps-chip ps-chip--mono">{port.hostIp || '*'}:{port.hostPort || '-'} to {port.containerPort}/{port.protocol}</span>)}</span>
+      : <span className="ps-mono">internal only</span>,
+  },
+  {
+    id: 'authority',
+    label: 'Authority',
+    getValue: ({ item }) => item.actions.join(', ') || 'read only',
+    render: ({ item }) => (
+      <span className="ps-remote-actions" aria-label={`Allowed actions: ${item.actions.join(', ') || 'none'}`}>
+        {['start', 'stop', 'restart', 'pull'].map((action) => (
+          <button
+            key={action}
+            type="button"
+            disabled={!item.actions.includes(action)}
+            onClick={() => item.runAction(action)}
+          >
+            {action}
+          </button>
+        ))}
+      </span>
+    ),
+  },
+];
+
 const DNS_FIELDS = [
   { id: 'domain', label: 'Scoped domain', getValue: ({ item }) => item.domain, aiValue: (item) => `*.${item.domain}`, render: ({ item }) => <span className="ps-mono">*.{item.domain}</span>, enableGlobalSearch: true },
   { id: 'ns', label: 'Nameserver', enableSorting: false, getValue: ({ item }) => item.nameservers.join(', ') || '—', render: ({ item }) => <span className="ps-mono">{item.nameservers.join(', ') || '—'}</span> },
@@ -364,6 +427,7 @@ const AI_WHAT = {
   tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
   services: 'the launchd agents I own on this machine, including disabled ones (their plist is parked under a .disabled suffix so login skips them)',
+  remote: 'the explicitly allowlisted Docker Compose services on dk-sin1 returned by Dockmaster through its forced-command SSH provider',
   dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
 };
 
@@ -373,6 +437,7 @@ const AI_ROW_QUESTION = {
   tlds: 'What is this suffix for, is its resolver file in place, and does anything look off — a vanity TLD with no sites, or a resolver file still pending a privileged apply?',
   ports: 'What is this process, and why would it be listening on this port? Tell me whether it is something a developer typically installs deliberately, what would break if I stopped it, and whether the port or bind address is a problem.',
   services: 'What does this launchd agent most likely do, what would break if I unloaded it, and does its state look healthy? A non-zero last exit code or a KeepAlive job that is not running means something is wrong — say so.',
+  remote: 'Does this remote service state look healthy, and are its exposed ports and currently allowlisted actions appropriate?',
   dns: 'What does this scoped resolver do, and is this a sensible configuration for local development? Tell me what would stop working if I removed it.',
 };
 
@@ -1136,6 +1201,85 @@ function Services() {
   );
 }
 
+function RemoteServices() {
+  const inventory = useApi('providers/dk-sin1/services');
+  const audit = useApi('providers/dk-sin1/audit');
+  const notify = useNotify();
+  if (inventory.error) return <PSNotice status="error" isDismissible={false}>{inventory.error}</PSNotice>;
+  if (!inventory.data) return <Spinner />;
+  const lifecycle = async (item, action) => {
+    if (['stop', 'restart'].includes(action) && !window.confirm(`${action} ${item.projectId}/${item.name} on dk-sin1?`)) return;
+    const response = await fetch('/api/providers/dk-sin1/services/action', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action, project: item.projectId, service: item.name }),
+    });
+    const result = await response.json();
+    if (!response.ok || result.error) {
+      notify(result.error || 'Remote provider action failed.', 'error');
+      return;
+    }
+    notify(`${item.projectId}/${item.name}: ${action} completed.`);
+    inventory.reload();
+    audit.reload();
+  };
+  const rows = inventory.data.projects.flatMap((project) => project.services.map((service) => {
+    const row = {
+      ...service,
+      _k: `${project.id}/${service.name}`,
+      projectId: project.id,
+      containerProject: project.project,
+      route: project.route,
+    };
+    row.runAction = (action) => lifecycle(row, action);
+    return row;
+  }));
+  const actions = [
+    { id: 'start', label: 'Start', callback: ([item]) => lifecycle(item, 'start'), isEligible: (item) => item.actions.includes('start') && item.state !== 'running' },
+    { id: 'stop', label: 'Stop', isDestructive: true, callback: ([item]) => lifecycle(item, 'stop'), isEligible: (item) => item.actions.includes('stop') && item.state === 'running' },
+    { id: 'restart', label: 'Restart', callback: ([item]) => lifecycle(item, 'restart'), isEligible: (item) => item.actions.includes('restart') },
+    { id: 'pull', label: 'Pull image', callback: ([item]) => lifecycle(item, 'pull'), isEligible: (item) => item.actions.includes('pull') },
+  ];
+  const sectionPrompt = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.remote}.`,
+    body: aiTable(REMOTE_SERVICE_FIELDS, rows),
+    question: AI_SECTION_QUESTION,
+  });
+  const auditLines = (audit.data?.records || []).slice(-20).map((record) => (
+    `${record.timestamp} ${record.actor} ${record.action} ${record.target} ${record.result}`
+  ));
+  return (
+    <Section
+      title="Remote services on dk-sin1"
+      actions={
+        <>
+          <CopyForAI build={sectionPrompt} what="the dk-sin1 service inventory" />
+          <Button __next40pxDefaultSize variant="secondary" onClick={() => { inventory.reload(); audit.reload(); }}>Refresh</Button>
+        </>
+      }
+    >
+      <div className="ps-dnsrow">
+        <Chip tone="success">forced-command SSH connected</Chip>
+        <Chip>{rows.length} allowlisted services</Chip>
+        <Chip>{inventory.data.generatedAt}</Chip>
+      </div>
+      <PSDataView
+        data={rows}
+        fields={REMOTE_SERVICE_FIELDS}
+        actions={actions}
+        itemKey="_k"
+        aiWhat={AI_WHAT.remote}
+        aiQuestion={AI_ROW_QUESTION.remote}
+      />
+      <Text className="ps-hint">Services are read-only unless their manifest and the local Dockmaster allowlist both grant a specific action. Coolify-managed projects are excluded.</Text>
+      <div className="ps-log">
+        <div className="ps-log__head"><span>Provider audit</span></div>
+        <pre>{audit.error ? 'Audit unavailable.' : auditLines.join('\n') || '(no lifecycle actions recorded)'}</pre>
+      </div>
+    </Section>
+  );
+}
+
 function Dns() {
   const { data, error, reload } = useApi('dns');
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
@@ -1209,7 +1353,7 @@ export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
   const [notices, setNotices] = useState([]);
-  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, dns: Dns }[page];
+  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, remote: RemoteServices, dns: Dns }[page];
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
   const setSidebarCollapsed = useCallback((v) => {
     setSidebarCollapsedState(v);

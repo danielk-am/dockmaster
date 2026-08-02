@@ -1,0 +1,7 @@
+#!/bin/sh
+exec /usr/bin/env -i \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  DOCKMASTER_PROVIDER_ACTOR=dockmaster-ssh \
+  /usr/bin/python3 \
+  /usr/local/libexec/dockmaster-provider/remote_provider.py \
+  --request-stdin

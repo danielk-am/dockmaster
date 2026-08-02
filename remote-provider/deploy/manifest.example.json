@@ -1,0 +1,41 @@
+{
+  "schema": "dockmaster-provider/v1",
+  "blocked_roots": [
+    "/data/coolify/services",
+    "/data/coolify/proxy"
+  ],
+  "route_file": "/etc/traefik/dynamic/dockmaster-managed.json",
+  "traefik_validation_image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "projects": [
+    {
+      "id": "example-mcp",
+      "owner": "manual",
+      "compose_dir": "/srv/example-mcp",
+      "compose_file": "/srv/example-mcp/compose.yaml",
+      "compose_dir_uid": 1000,
+      "compose_dir_gid": 1000,
+      "compose_file_uid": 1000,
+      "compose_file_gid": 1000,
+      "project": "example-mcp",
+      "services": [
+        {
+          "name": "example-mcp",
+          "actions": [
+            "start",
+            "stop",
+            "restart",
+            "pull"
+          ],
+          "internal_port": 8787,
+          "health_path": "/healthz"
+        }
+      ],
+      "route": {
+        "hostname": "example.invalid",
+        "entrypoint": "https",
+        "service": "example-mcp"
+      },
+      "rollback": "restore the prior image and run docker compose up -d"
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+Defaults:dockmaster-provider env_reset
+Defaults:dockmaster-provider secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+dockmaster-provider ALL=(root) NOPASSWD: /usr/local/sbin/dockmaster-provider-root ""

@@ -1,3 +1,8 @@
 node_modules
 dist
 .DS_Store
+**/__pycache__/
+*.py[cod]
+remote-provider/deploy/manifest.inventory.json
+remote-provider/evidence/
+fixtures/**/ORCH-*-EVIDENCE.md

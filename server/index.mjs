@@ -13,6 +13,11 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  createRemoteProvider,
+  remoteProviderOptionsFromEnvironment,
+  RemoteProviderError,
+} from './remote-provider-lib.mjs';
+import {
   ALIAS_IP,
   ALIAS_IP6,
   BUILTIN_TLDS,
@@ -34,6 +39,17 @@ const HOME = homedir();
 const UID = process.getuid();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appVersion = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+const remoteProviderOptions = remoteProviderOptionsFromEnvironment();
+const remoteProvider = remoteProviderOptions
+  ? createRemoteProvider(remoteProviderOptions)
+  : Object.freeze({
+      request() {
+        return Promise.reject(new RemoteProviderError(
+          'NOT_CONFIGURED',
+          'Remote provider is not configured.',
+        ));
+      },
+    });
 
 // Every sudo command the UI hands out is derived from where this repo
 // actually lives: the hardcoded ~/ai/repos/dockmaster path went stale when
@@ -280,6 +296,43 @@ const app = express();
 app.use(express.json());
 
 app.get('/api/ingress', async (_req, res) => res.json(await ingressState()));
+const remoteProviderError = (res, error) => {
+  if (error instanceof RemoteProviderError && error.code === 'NOT_CONFIGURED') {
+    return res.status(503).json({ error: 'The remote provider is not configured.' });
+  }
+  if (error instanceof RemoteProviderError && error.code === 'INVALID_REQUEST') {
+    return res.status(400).json({ error: 'Remote provider request is invalid.' });
+  }
+  if (error instanceof RemoteProviderError && error.code === 'NOT_ALLOWLISTED') {
+    return res.status(403).json({ error: 'Remote provider action is not allowlisted.' });
+  }
+  return res.status(502).json({ error: 'The dk-sin1 provider is unavailable.' });
+};
+
+app.get('/api/providers/dk-sin1/services', async (_req, res) => {
+  try {
+    res.json(await remoteProvider.request({ action: 'inventory' }));
+  } catch (error) {
+    remoteProviderError(res, error);
+  }
+});
+
+app.get('/api/providers/dk-sin1/audit', async (_req, res) => {
+  try {
+    res.json(await remoteProvider.request({ action: 'audit' }));
+  } catch (error) {
+    remoteProviderError(res, error);
+  }
+});
+
+app.post('/api/providers/dk-sin1/services/action', async (req, res) => {
+  const { action, project, service } = req.body || {};
+  try {
+    res.json(await remoteProvider.request({ action, project, service }));
+  } catch (error) {
+    remoteProviderError(res, error);
+  }
+});
 
 app.post('/api/ingress/domains', async (req, res) => {
   // The UI sends the bare NAME plus a TLD; the suffix is never typed on every
