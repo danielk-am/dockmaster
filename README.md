@@ -99,10 +99,11 @@ order: **Ask Dockmaster**, **Help & Feedback**, then **App settings**. Active
 navigation uses background and weight, never a left stripe. Authored dropdowns
 use the shared `PopoverSelect`; native select menus are not part of the app UI.
 
-The generated 36px product mark and 28px local-operator avatar use
-`@1dr0/wpds-identity` with stable, non-secret seeds and no external image
-request. Optional generated logo explorations remain in `public/` as static
-assets. Runtime identity stays deterministic.
+The generated 36px anchor-and-services product mark and 28px local-operator
+avatar use `@1dr0/wpds-identity` with stable, non-secret seeds and no external
+image request. The app mark has its own use-case-specific silhouette; it is not
+a recoloured family placeholder. Optional generated logo explorations remain in
+`public/` as static assets. Runtime identity stays deterministic.
 
 README remains repository documentation and is not rendered as a web link
 because the loopback host does not serve repository Markdown. Dockmaster has a
@@ -128,4 +129,4 @@ an upstream or assert owner status.
 
 Vendored packages are refreshed from UI Playground with `npm pack`, then
 installed from `vendor/1dr0-ai-chat-0.7.1.tgz` and
-`vendor/1dr0-wpds-identity-0.1.0.tgz`.
+`vendor/1dr0-wpds-identity-0.2.0.tgz`.
