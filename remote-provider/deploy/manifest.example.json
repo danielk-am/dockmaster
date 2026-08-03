@@ -4,7 +4,7 @@
     "/data/coolify/services",
     "/data/coolify/proxy"
   ],
-  "route_file": "/etc/traefik/dynamic/dockmaster-managed.json",
+  "route_file": "/etc/traefik/dynamic/dockmaster-managed.yaml",
   "traefik_validation_image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
   "projects": [
     {

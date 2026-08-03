@@ -70,8 +70,8 @@ def validate_manifest(manifest: dict) -> dict:
     if not blocked or not all(path.is_absolute() for path in blocked):
         raise ManifestError("blocked roots must be absolute and non-empty")
     route_file = Path(str(manifest.get("route_file") or ""))
-    if not route_file.is_absolute() or route_file.name != "dockmaster-managed.json":
-        raise ManifestError("route file must be the dedicated dockmaster-managed.json path")
+    if not route_file.is_absolute() or route_file.name != "dockmaster-managed.yaml":
+        raise ManifestError("route file must be the dedicated dockmaster-managed.yaml path")
     if not IMAGE_DIGEST_RE.fullmatch(str(manifest.get("traefik_validation_image") or "")):
         raise ManifestError("Traefik validation image must be pinned by sha256 digest")
 
@@ -194,7 +194,7 @@ def make_traefik_validator(
         if not candidate.is_file():
             return False, "candidate is not a regular file"
         name = f"dockmaster-traefik-validate-{uuid.uuid4().hex[:12]}"
-        mount = f"type=bind,src={candidate},dst=/dynamic/dockmaster-managed.json,readonly"
+        mount = f"type=bind,src={candidate},dst=/dynamic/dockmaster-managed.yaml,readonly"
         started = False
         try:
             rc, stdout, _stderr = runner(
@@ -218,7 +218,7 @@ def make_traefik_validator(
                     "--mount",
                     mount,
                     image_digest,
-                    "--providers.file.filename=/dynamic/dockmaster-managed.json",
+                    "--providers.file.filename=/dynamic/dockmaster-managed.yaml",
                     "--providers.file.watch=false",
                     "--entrypoints.http.address=:8080",
                     "--entrypoints.https.address=:8443",
@@ -468,11 +468,14 @@ class Provider:
                 continue
             name = f"dockmaster-{project['id']}"
             service = next(item for item in project["services"] if item["name"] == route["service"])
-            routers[name] = {
+            router = {
                 "entryPoints": [route["entrypoint"]],
                 "rule": f"Host(`{route['hostname']}`)",
                 "service": name,
             }
+            if route["entrypoint"] == "https":
+                router["tls"] = {"certResolver": "letsencrypt"}
+            routers[name] = router
             services[name] = {
                 "loadBalancer": {
                     "servers": [{"url": f"http://{route['service']}:{service['internal_port']}"}]

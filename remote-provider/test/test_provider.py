@@ -103,7 +103,7 @@ class ProviderTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.compose_dir = self.root / "services" / "node-fixture"
         self.compose_dir.mkdir(parents=True)
-        self.route_file = self.root / "dynamic" / "dockmaster-managed.json"
+        self.route_file = self.root / "dynamic" / "dockmaster-managed.yaml"
         self.audit_file = self.root / "audit" / "audit.jsonl"
         self.cache_file = self.root / "cache" / "inventory.json"
         self.manifest = manifest_for(self.compose_dir, self.route_file)
@@ -125,6 +125,12 @@ class ProviderTests(unittest.TestCase):
         bad["projects"][0]["compose_dir"] = "/data/coolify/services/owned"
         bad["projects"][0]["compose_file"] = "/data/coolify/services/owned/compose.yaml"
         with self.assertRaisesRegex(ManifestError, "blocked root"):
+            validate_manifest(bad)
+
+    def test_manifest_rejects_a_route_extension_ignored_by_traefik_directory_provider(self):
+        bad = manifest_for(self.compose_dir, self.route_file)
+        bad["route_file"] = str(self.route_file.with_suffix(".json"))
+        with self.assertRaisesRegex(ManifestError, "dockmaster-managed.yaml"):
             validate_manifest(bad)
 
     def test_manifest_rejects_symlink_escape(self):
@@ -228,6 +234,22 @@ class ProviderTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(self.route_file.stat().st_mode), 0o600)
         self.assertFalse(list(self.route_file.parent.glob("*.tmp")))
 
+    def test_https_route_uses_the_existing_letsencrypt_resolver(self):
+        self.manifest["projects"][0]["route"]["entrypoint"] = "https"
+        provider = Provider(
+            self.manifest,
+            runner=self.runner,
+            audit_file=self.audit_file,
+            cache_file=self.cache_file,
+            route_validator=lambda _: (True, "validated"),
+        )
+
+        provider.apply_routes(actor="dockmaster-local")
+
+        payload = json.loads(self.route_file.read_text(encoding="utf-8"))
+        router = payload["http"]["routers"]["dockmaster-node-fixture"]
+        self.assertEqual(router["tls"], {"certResolver": "letsencrypt"})
+
     def test_route_validation_failure_preserves_previous_file(self):
         self.route_file.parent.mkdir(parents=True)
         self.route_file.write_text('{"previous":true}\n', encoding="utf-8")
@@ -309,7 +331,7 @@ class TraefikValidatorTests(unittest.TestCase):
             raise AssertionError(argv)
 
         with tempfile.TemporaryDirectory() as directory:
-            candidate = Path(directory).resolve() / "candidate.json"
+            candidate = Path(directory).resolve() / "candidate.yaml"
             candidate.write_text('{"http":{"routers":{},"services":{}}}\n', encoding="utf-8")
             validator = make_traefik_validator(
                 runner,
@@ -343,7 +365,7 @@ class TraefikValidatorTests(unittest.TestCase):
             raise AssertionError(argv)
 
         with tempfile.TemporaryDirectory() as directory:
-            candidate = Path(directory).resolve() / "candidate.json"
+            candidate = Path(directory).resolve() / "candidate.yaml"
             candidate.write_text("{}\n", encoding="utf-8")
             valid, evidence = make_traefik_validator(
                 runner,
