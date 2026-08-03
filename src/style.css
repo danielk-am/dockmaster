@@ -79,7 +79,7 @@ body {
 	left: auto;
 	right: -8px;
 	top: 50%;
-	justify-content: center;
+	justify-content: flex-end;
 	z-index: 4;
 }
 
