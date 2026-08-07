@@ -6,6 +6,7 @@
   "description": "Dockmaster — local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
   "scripts": {
     "dev": "vite",
+    "test": "node --test test/*.test.mjs",
     "build": "vite build",
     "serve": "node server/index.mjs",
     "start": "npm run build && node server/index.mjs"

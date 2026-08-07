@@ -1,7 +1,17 @@
 // Dockmaster — the app shell (composing-app-shells: brand header, nav,
 // version footer) around the views + management of local dev infra.
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
+import {
+  BaseControl,
+  Button,
+  Notice,
+  SnackbarList,
+  Spinner,
+  TextareaControl,
+  TextControl,
+  useBaseControlProps,
+  __experimentalText as Text,
+} from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
 import { chevronLeft, menu } from '@wordpress/icons';
 
@@ -61,7 +71,13 @@ function ThemeSwitch({ pref, onChange }) {
   return (
     <div className="ps-themeswitch" role="group" aria-label="Theme">
       {THEMES.map((t) => (
-        <button key={t} className={pref === t ? 'is-active' : ''} onClick={() => onChange(t)}>
+        <button
+          key={t}
+          type="button"
+          className={pref === t ? 'is-active' : ''}
+          aria-pressed={pref === t}
+          onClick={() => onChange(t)}
+        >
           {t[0].toUpperCase() + t.slice(1)}
         </button>
       ))}
@@ -81,6 +97,24 @@ function useApi(path, deps = []) {
 }
 
 const Chip = ({ tone = 'neutral', children }) => <span className={`ps-chip ps-chip--${tone}`}>{children}</span>;
+
+// A composed field still gets WordPress' label and help treatment. The hook
+// wires both to the primary input, including aria-describedby for the help.
+function ConversationalField({ label, description, children }) {
+  const { baseControlProps, controlProps } = useBaseControlProps({
+    label,
+    className: 'ps-conversational-field',
+  });
+  const descriptionId = `${controlProps.id}__description`;
+  return (
+    <BaseControl {...baseControlProps}>
+      <p id={descriptionId} className="components-base-control__help ps-conversational-field__description">
+        {description}
+      </p>
+      {children({ ...controlProps, 'aria-describedby': descriptionId })}
+    </BaseControl>
+  );
+}
 
 // Copy-for-AI. Every row and every section can be lifted out as a prompt you
 // can paste into a cold assistant chat: the frame (what this machine is and
@@ -664,32 +698,56 @@ function Ingress() {
         </PSNotice>
       )}
       {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
-      <div className="ps-addrow">
-        <div className="ps-suffixfield">
-          <input
-            placeholder="myapp"
-            value={name}
-            onChange={(e) => setName(e.target.value.toLowerCase().replace(new RegExp(`\\.${tld}$`), ''))}
-            onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
-          />
-          <select className="ps-suffix-select" value={tld} aria-label="TLD" onChange={(e) => setTld(e.target.value)}>
-            {(tlds.data?.tlds?.map((t) => t.tld) || ['test']).map((t) => (
-              <option key={t} value={t}>.{t}</option>
-            ))}
-          </select>
+      <form className="ps-form" onSubmit={(e) => { e.preventDefault(); if (name && port) add(); }}>
+        <ConversationalField
+          label="Domain"
+          description="Choose the local address you’ll type in your browser. Use .test unless you already rely on a private vanity suffix."
+        >
+          {(controlProps) => (
+            <div className="ps-suffixfield">
+              <input
+                {...controlProps}
+                placeholder="myapp"
+                value={name}
+                onChange={(e) => setName(e.target.value.toLowerCase().replace(new RegExp(`\\.${tld}$`), ''))}
+              />
+              <select
+                className="ps-suffix-select"
+                value={tld}
+                aria-label="Domain suffix"
+                aria-describedby={controlProps['aria-describedby']}
+                onChange={(e) => setTld(e.target.value)}
+              >
+                {(tlds.data?.tlds?.map((item) => item.tld) || ['test']).map((item) => (
+                  <option key={item} value={item}>.{item}</option>
+                ))}
+              </select>
+            </div>
+          )}
+        </ConversationalField>
+        <ConversationalField
+          label="Upstream port"
+          description="Enter the port where this app is already listening. Dockmaster will send this domain to 127.0.0.1 on that port."
+        >
+          {(controlProps) => (
+            <TextControl
+              {...controlProps}
+              __next40pxDefaultSize
+              __nextHasNoMarginBottom
+              label=""
+              placeholder="3000"
+              inputMode="numeric"
+              value={port}
+              onChange={(value) => setPort(value.replace(/\D/g, ''))}
+            />
+          )}
+        </ConversationalField>
+        <div className="ps-form__actions">
+          <Button __next40pxDefaultSize type="submit" variant="primary" isBusy={busy} disabled={!name || !port}>
+            Add domain
+          </Button>
         </div>
-        <input
-          className="ps-search ps-portinput"
-          placeholder="port"
-          inputMode="numeric"
-          value={port}
-          onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
-          onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
-        />
-        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!name || !port} onClick={add}>
-          Add domain
-        </Button>
-      </div>
+      </form>
       <div className="ps-subhead-row">
         <h3 className="ps-subhead ps-subhead--flush">Registered domains</h3>
         <CopyForAI build={registeredBlock} what="the registered domains" />
@@ -698,7 +756,7 @@ function Ingress() {
         data={data.domains}
         fields={DOMAIN_FIELDS}
         actions={[
-          { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port) }) },
+          { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port), originalPort: String(item.port) }) },
           { id: 'service-link', label: 'Link service…', callback: ([item]) => setSvcEdit({ host: item.host, service: item.service || '' }) },
           { id: 'service-start', label: 'Start service', isEligible: (item) => !!item.service && !item.serviceState?.missing && !item.serviceState?.disabled && !item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'start') },
           { id: 'service-stop', label: 'Stop service', isDestructive: true, isEligible: (item) => !!item.service && !!item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'stop') },
@@ -709,44 +767,59 @@ function Ingress() {
         aiQuestion={AI_ROW_QUESTION.domains}
       />
       {edit && (
-        <div className="ps-addrow">
-          <div className="ps-suffixfield">
-            <input value={edit.host} disabled />
-            <span>→ 127.0.0.1:</span>
+        <form className="ps-form ps-form--editing" onSubmit={(e) => { e.preventDefault(); if (edit.port) savePort(); }}>
+          <p className="ps-form__context"><strong>{edit.host}</strong> currently points to 127.0.0.1:{edit.originalPort}.</p>
+          <ConversationalField
+            label="New upstream port"
+            description="Choose the port where this app is listening now. Saving updates the live route for this domain."
+          >
+            {(controlProps) => (
+              <TextControl
+                {...controlProps}
+                __next40pxDefaultSize
+                __nextHasNoMarginBottom
+                label=""
+                autoFocus
+                inputMode="numeric"
+                value={edit.port}
+                onChange={(value) => setEdit({ ...edit, port: value.replace(/\D/g, '') })}
+                onKeyDown={(e) => { if (e.key === 'Escape') setEdit(null); }}
+              />
+            )}
+          </ConversationalField>
+          <div className="ps-form__actions">
+            <Button __next40pxDefaultSize type="submit" variant="primary" isBusy={busy} disabled={!edit.port}>Save port</Button>
+            <Button __next40pxDefaultSize type="button" variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
           </div>
-          <input
-            className="ps-search ps-portinput"
-            autoFocus
-            inputMode="numeric"
-            value={edit.port}
-            onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/\D/g, '') })}
-            onKeyDown={(e) => { if (e.key === 'Enter' && edit.port) savePort(); if (e.key === 'Escape') setEdit(null); }}
-          />
-          <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!edit.port} onClick={savePort}>Save port</Button>
-          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
-        </div>
+        </form>
       )}
       {svcEdit && (
-        <div className="ps-addrow">
-          <div className="ps-suffixfield">
-            <input value={svcEdit.host} disabled />
-            <span>backed by</span>
-          </div>
-          <select
-            className="ps-suffix-select"
-            autoFocus
-            aria-label="Launchd agent"
-            value={svcEdit.service}
-            onChange={(e) => setSvcEdit({ ...svcEdit, service: e.target.value })}
+        <form className="ps-form ps-form--editing" onSubmit={(e) => { e.preventDefault(); saveService(); }}>
+          <p className="ps-form__context">Link a service to <strong>{svcEdit.host}</strong>.</p>
+          <ConversationalField
+            label="Launchd service"
+            description="Linking lets Dockmaster show service state and start or stop it beside this domain. Choose no service to unlink it."
           >
-            <option value="">— no service —</option>
-            {[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])].sort().map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-          <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
-          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
-        </div>
+            {(controlProps) => (
+              <select
+                {...controlProps}
+                className="ps-native-select"
+                autoFocus
+                value={svcEdit.service}
+                onChange={(e) => setSvcEdit({ ...svcEdit, service: e.target.value })}
+              >
+                <option value="">No service</option>
+                {[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])]
+                  .sort()
+                  .map((service) => <option key={service} value={service}>{service}</option>)}
+              </select>
+            )}
+          </ConversationalField>
+          <div className="ps-form__actions">
+            <Button __next40pxDefaultSize type="submit" variant="primary" isBusy={busy}>Save link</Button>
+            <Button __next40pxDefaultSize type="button" variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
+          </div>
+        </form>
       )}
       {confirmHost && (
         <PSNotice status="warning" onRemove={() => setConfirmHost(null)} spokenMessage={`Remove ${confirmHost} — site block and cert?`}>
@@ -797,32 +870,38 @@ function Ingress() {
             aiQuestion={AI_ROW_QUESTION.observed}
           />
           {ipEdit && (
-            <div className="ps-addrow">
-              <div className="ps-suffixfield">
-                <input value={ipEdit.kind === 'dnsmasq-set' ? `address=/${ipEdit.key}/` : ipEdit.name} disabled />
-                <span>{ipEdit.kind === 'dnsmasq-set' ? '' : '→'}</span>
-              </div>
-              <input
-                className="ps-search"
-                autoFocus
-                placeholder="IP address"
-                value={ipEdit.ip}
-                onChange={(e) => setIpEdit({ ...ipEdit, ip: e.target.value.trim() })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && ipEdit.ip) { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }
-                  if (e.key === 'Escape') setIpEdit(null);
-                }}
-              />
-              <Button
-                __next40pxDefaultSize
-                variant="primary"
-                disabled={!ipEdit.ip}
-                onClick={() => { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }}
+            <form className="ps-form ps-form--editing" onSubmit={(e) => {
+              e.preventDefault();
+              if (!ipEdit.ip) return;
+              stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip });
+              setIpEdit(null);
+            }}>
+              <p className="ps-form__context">Change where <strong>{ipEdit.name}</strong> resolves.</p>
+              <ConversationalField
+                label="IP address"
+                description={ipEdit.kind === 'dnsmasq-set'
+                  ? 'Set the address dnsmasq should return for this name. The change stays staged until you run the shown sudo command.'
+                  : 'Set the address the hosts file should return for this name. The change stays staged until you run the shown sudo command.'}
               >
-                Stage edit
-              </Button>
-              <Button __next40pxDefaultSize variant="tertiary" onClick={() => setIpEdit(null)}>Cancel</Button>
-            </div>
+                {(controlProps) => (
+                  <TextControl
+                    {...controlProps}
+                    __next40pxDefaultSize
+                    __nextHasNoMarginBottom
+                    label=""
+                    autoFocus
+                    placeholder="127.0.0.1"
+                    value={ipEdit.ip}
+                    onChange={(value) => setIpEdit({ ...ipEdit, ip: value.trim() })}
+                    onKeyDown={(e) => { if (e.key === 'Escape') setIpEdit(null); }}
+                  />
+                )}
+              </ConversationalField>
+              <div className="ps-form__actions">
+                <Button __next40pxDefaultSize type="submit" variant="primary" disabled={!ipEdit.ip}>Stage edit</Button>
+                <Button __next40pxDefaultSize type="button" variant="tertiary" onClick={() => setIpEdit(null)}>Cancel</Button>
+              </div>
+            </form>
           )}
           {resEdit && (
             <div className="ps-log ps-editor">
@@ -833,12 +912,23 @@ function Ingress() {
                   <Button size="small" variant="tertiary" onClick={() => setResEdit(null)}>Close</Button>
                 </span>
               </div>
-              <textarea
-                className="ps-editor__area ps-editor__area--short"
-                spellCheck={false}
-                value={resEdit.content}
-                onChange={(e) => setResEdit({ ...resEdit, content: e.target.value })}
-              />
+              <ConversationalField
+                label={`Resolver rules for .${resEdit.file}`}
+                description="Each line controls how macOS resolves this suffix. Your change is staged and won’t touch /etc until you run the shown sudo command."
+              >
+                {(controlProps) => (
+                  <TextareaControl
+                    {...controlProps}
+                    __nextHasNoMarginBottom
+                    className="ps-editor__field ps-editor__field--short"
+                    label=""
+                    spellCheck={false}
+                    rows={5}
+                    value={resEdit.content}
+                    onChange={(content) => setResEdit({ ...resEdit, content })}
+                  />
+                )}
+              </ConversationalField>
             </div>
           )}
           <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — including domains other tools own. These files are root-owned, so edits stage into a queue and apply with the one sudo command above (backups are written; dnsmasq restarts and caches flush automatically). "Divergent" = the system resolver and dnsmasq disagree. Rows marked <em>managed</em> belong to the registry at the top — edit them there.</Text>
@@ -933,20 +1023,29 @@ function Tlds() {
           </ul>
         </PSNotice>
       )}
-      <div className="ps-addrow">
-        <div className="ps-suffixfield">
-          <span>.</span>
-          <input
-            placeholder="1dr0"
-            value={label}
-            onChange={(e) => setLabel(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-            onKeyDown={(e) => { if (e.key === 'Enter' && label) add(); }}
-          />
+      <form className="ps-form" onSubmit={(e) => { e.preventDefault(); if (label) add(); }}>
+        <ConversationalField
+          label="Vanity TLD"
+          description="Add only the suffix, without the dot. Dockmaster will register it for local use and stage the resolver file when needed."
+        >
+          {(controlProps) => (
+            <div className="ps-suffixfield ps-suffixfield--prefix">
+              <span aria-hidden="true">.</span>
+              <input
+                {...controlProps}
+                placeholder="1dr0"
+                value={label}
+                onChange={(e) => setLabel(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+              />
+            </div>
+          )}
+        </ConversationalField>
+        <div className="ps-form__actions">
+          <Button __next40pxDefaultSize type="submit" variant="primary" isBusy={busy} disabled={!label}>
+            Add TLD
+          </Button>
         </div>
-        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!label} onClick={add}>
-          Add TLD
-        </Button>
-      </div>
+      </form>
       <PSDataView
         data={data.tlds}
         fields={TLD_FIELDS}
@@ -1124,12 +1223,23 @@ function Services() {
               <Button size="small" variant="tertiary" onClick={() => setEditor(null)}>Close</Button>
             </span>
           </div>
-          <textarea
-            className="ps-editor__area"
-            spellCheck={false}
-            value={editor.text}
-            onChange={(e) => setEditor({ ...editor, text: e.target.value, dirty: true })}
-          />
+          <ConversationalField
+            label="Launchd property list"
+            description="Edit the XML that defines how this agent starts. Dockmaster validates it before replacing the live file."
+          >
+            {(controlProps) => (
+              <TextareaControl
+                {...controlProps}
+                __nextHasNoMarginBottom
+                className="ps-editor__field"
+                label=""
+                spellCheck={false}
+                rows={14}
+                value={editor.text}
+                onChange={(text) => setEditor({ ...editor, text, dirty: true })}
+              />
+            )}
+          </ConversationalField>
         </div>
       )}
     </Section>
@@ -1244,7 +1354,15 @@ export default function App() {
         </div>
         <nav className="ps-nav">
           {NAV.map((n) => (
-            <button key={n.id} className={page === n.id ? 'is-active' : ''} onClick={() => setPage(n.id)}>{n.label}</button>
+            <button
+              key={n.id}
+              type="button"
+              className={page === n.id ? 'is-active' : ''}
+              aria-current={page === n.id ? 'page' : undefined}
+              onClick={() => setPage(n.id)}
+            >
+              {n.label}
+            </button>
           ))}
         </nav>
         <div className="ps-sidebar__footer">

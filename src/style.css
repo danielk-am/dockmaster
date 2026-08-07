@@ -206,14 +206,17 @@ body {
 .ps-log__head .components-button + .components-button { margin-left: 6px; }
 .ps-log pre { margin: 0; padding: 14px; font-size: 12px; max-height: 320px; overflow: auto; }
 
-/* Plist editor: plain mono textarea over the validate-then-swap save API. */
-.ps-editor__area {
+/* Config editors keep the native WordPress field anatomy and use a mono
+   textarea for the payload itself. */
+.ps-editor > .ps-conversational-field { padding: 16px; }
+.ps-editor__field { width: 100%; }
+.ps-editor__field .components-base-control__field { margin: 0; }
+.ps-editor__field .components-textarea-control__input {
 	display: block; width: 100%; min-height: 320px; resize: vertical;
-	border: 0; outline: none; padding: 14px;
 	background: var(--ps-surface); color: var(--ps-text);
 	font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5;
 }
-.ps-editor__area--short { min-height: 120px; }
+.ps-editor__field--short .components-textarea-control__input { min-height: 120px; }
 
 /* Staged-edit queue inside the sudo callout. */
 .ps-editlist { margin: 12px 0 0; padding-left: 20px; }
@@ -250,17 +253,46 @@ body {
 	.ps-app.is-sidebar-collapsed .ps-main { padding: 16px; }
 }
 
-/* Ingress management: the add row and the fixed .test suffix field. */
-.ps-addrow { display: flex; gap: 8px; align-items: center; margin: 20px 0; }
+/* Editable workflows use the same conversational anatomy: label, useful help,
+   full-width control, then actions. */
+.ps-form {
+	display: flex; flex-direction: column; gap: 20px; width: 100%; max-width: 720px;
+	margin: 20px 0 28px; padding: 20px; border: 1px solid var(--ps-border);
+	border-radius: 8px; background: var(--ps-surface);
+}
+.ps-form--editing { margin-top: 0; }
+.ps-form .components-base-control,
+.ps-form .components-base-control__field,
+.ps-form .components-text-control__input,
+.ps-form .ps-native-select,
+.ps-conversational-field { width: 100%; }
+.ps-form .components-base-control__label,
+.ps-editor .components-base-control__label { display: block; margin-bottom: 6px; color: var(--ps-text); }
+.ps-form .components-base-control__help,
+.ps-editor .components-base-control__help { margin: 6px 0 0; color: var(--ps-muted); line-height: 1.5; }
+.ps-conversational-field__description { margin: 0 0 8px !important; }
+.ps-conversational-field > .components-base-control__field > .components-base-control { margin-bottom: 0; }
+.ps-form .components-text-control__input,
+.ps-form .ps-native-select { background: var(--ps-surface); color: var(--ps-text); }
+.ps-native-select {
+	height: 40px; padding: 0 32px 0 12px; border: 1px solid var(--ps-input-border);
+	border-radius: 2px; font: inherit;
+}
+.ps-native-select:focus { outline: none; border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
+.ps-form__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-form__context { margin: 0; color: var(--ps-muted); }
+.ps-form__context strong { color: var(--ps-text); font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+
+/* Domain name and suffix are one composed field. */
 .ps-suffixfield {
-	display: flex; align-items: center; height: 40px;
+	display: flex; align-items: center; width: 100%; height: 40px;
 	border: 1px solid var(--ps-input-border); border-radius: 2px; background: var(--ps-surface);
 	overflow: hidden;
 }
 .ps-suffixfield:focus-within { border-color: var(--ps-accent); box-shadow: 0 0 0 0.5px var(--ps-accent); }
 .ps-suffixfield input {
 	border: 0; outline: none; height: 100%; padding: 0 2px 0 12px; font-size: 13px;
-	min-width: 160px; background: transparent; color: var(--ps-text);
+	min-width: 0; flex: 1; background: transparent; color: var(--ps-text);
 	font-family: SFMono-Regular, Menlo, Consolas, monospace;
 }
 .ps-suffixfield span {
@@ -280,7 +312,7 @@ body {
 	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%239a9a9a'%3E%3Cpath d='M5.5 8l4.5 4.5L14.5 8z'/%3E%3C/svg%3E");
 }
 .ps-suffixfield select:focus { color: var(--ps-text); }
-.ps-portinput { min-width: 90px; width: 90px; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+.ps-suffixfield--prefix input { padding-left: 0; }
 .ps-command { cursor: pointer; font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .ps-command:hover { color: var(--ps-accent); }
 .ps-emptycell { color: var(--ps-muted); text-align: center; padding: 24px !important; }
