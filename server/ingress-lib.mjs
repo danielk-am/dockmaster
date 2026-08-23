@@ -84,17 +84,34 @@ export const HOSTS_FILE = '/etc/hosts';
 export const HOSTS_PENDING = path.join(STATE, 'hosts-pending.conf');
 export const hostsLines = (host) => [`${ALIAS_IP} ${host}`, `${ALIAS_IP6} ${host}`];
 
+// launchd watches these files for auto-apply. Avoid rewriting identical
+// content on every GET /api/ingress, which would wake the root helper even
+// when there is nothing new to do. Rename keeps each update atomic if the
+// helper claims the previous file at the same moment.
+const writeIfChanged = (file, content) => {
+	let current = null;
+	try { current = fs.readFileSync(file, 'utf8'); } catch { /* create below */ }
+	if (current === content) return;
+	const tmp = `${file}.${process.pid}.tmp`;
+	try {
+		fs.writeFileSync(tmp, content);
+		fs.renameSync(tmp, file);
+	} finally {
+		try { fs.rmSync(tmp); } catch { /* renamed or never created */ }
+	}
+};
+
 // Privileged residue (dnsmasq address= lines + /etc/hosts entries) is
-// staged into pending files and applied by deploy/apply-dns.sh. A line
-// leaves its staging file once the target file already carries it.
+// staged into pending files and consumed by auto-apply or apply-dns.sh.
+// A line leaves its staging file once the target file already carries it.
 export const refreshDnsPending = () => {
 	const conf = fs.existsSync(DNSMASQ_CONF) ? fs.readFileSync(DNSMASQ_CONF, 'utf8') : '';
 	const hosts = fs.existsSync(HOSTS_FILE) ? fs.readFileSync(HOSTS_FILE, 'utf8') : '';
 	const reg = readRegistry();
 	const pendingDns = reg.domains.flatMap((d) => dnsLines(d.host)).filter((line) => !conf.includes(line));
 	const pendingHosts = reg.domains.flatMap((d) => hostsLines(d.host)).filter((line) => !hosts.includes(line));
-	fs.writeFileSync(DNS_PENDING, pendingDns.length ? pendingDns.join('\n') + '\n' : '');
-	fs.writeFileSync(HOSTS_PENDING, pendingHosts.length ? pendingHosts.join('\n') + '\n' : '');
+	writeIfChanged(DNS_PENDING, pendingDns.length ? pendingDns.join('\n') + '\n' : '');
+	writeIfChanged(HOSTS_PENDING, pendingHosts.length ? pendingHosts.join('\n') + '\n' : '');
 	return [...pendingDns, ...pendingHosts];
 };
 

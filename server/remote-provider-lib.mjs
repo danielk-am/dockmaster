@@ -9,6 +9,7 @@ const INVENTORY_SCHEMA = 'dockmaster-provider-inventory/v1';
 const READ_ACTIONS = new Set(['inventory', 'audit']);
 const LIFECYCLE_ACTIONS = new Set(['start', 'stop', 'restart', 'pull']);
 const ALL_ACTIONS = new Set([...READ_ACTIONS, ...LIFECYCLE_ACTIONS]);
+const AUDIT_ACTIONS = new Set([...ALL_ACTIONS, 'routes-apply', 'routes-remove']);
 const ACTION_ORDER = ['start', 'stop', 'restart', 'pull'];
 const ACTION_TIMEOUT_MS = Object.freeze({
   inventory: 8_000,
@@ -353,7 +354,7 @@ const sanitizeAuditRecord = (wire) => {
     requestId: requireOpaqueId(wire.request_id),
     timestamp: requireTimestamp(wire.timestamp),
     actor: requireText(wire.actor, 160),
-    action: requireEnum(wire.action, ALL_ACTIONS),
+    action: requireEnum(wire.action, AUDIT_ACTIONS),
     target: requireText(wire.target, 160),
     result: requireEnum(wire.result, AUDIT_RESULTS),
   };

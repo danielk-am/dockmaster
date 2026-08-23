@@ -1,19 +1,18 @@
-/* Theme tokens — the system | light | dark triad. Light is the default and
-   matches the Snippet Manager's white approach (white surfaces, #dcdcde
-   borders, Blueberry accent). "System" is resolved in JS to light/dark from
-   prefers-color-scheme and stamped as data-theme on <html>, so CSS only
-   ever sees the two concrete themes. */
+/* Shared Waypoint 1.1.0 tokens. The product stays quiet and structural:
+   near-white planes, charcoal type, Blueberry actions, and layered dark
+   surfaces without decorative shadows. */
 :root {
 	--ps-accent: #3858e9;
 	--ps-accent-dark: #2145e6;
-	--ps-canvas: #fff;
+	--ps-accent-soft: #eef1ff;
+	--ps-canvas: #f7f8fa;
 	--ps-surface: #fff;
-	--ps-subtle: #f6f7f7;
-	--ps-text: #1e1e1e;
-	--ps-muted: #757575;
-	--ps-border: #dcdcde;
-	--ps-hairline: #f0f0f0;
-	--ps-hover: #f0f0f1;
+	--ps-subtle: #f3f4f6;
+	--ps-text: #202124;
+	--ps-muted: #646970;
+	--ps-border: #dfe1e5;
+	--ps-hairline: #eceef1;
+	--ps-hover: #f1f3f5;
 	--ps-input-border: #949494;
 	--ps-chip-bg: #f0f0f0;
 	--ps-chip-text: #1e1e1e;
@@ -31,13 +30,16 @@
 }
 
 :root[data-theme='dark'] {
-	--ps-canvas: #1e1e1e;
-	--ps-surface: #262626;
-	--ps-subtle: #2c2c2c;
-	--ps-text: #e0e0e0;
-	--ps-muted: #9a9a9a;
-	--ps-border: #3c3c3c;
-	--ps-hairline: #303030;
+	--ps-accent: #92a4ff;
+	--ps-accent-dark: #aebaff;
+	--ps-accent-soft: #252b40;
+	--ps-canvas: #191a1d;
+	--ps-surface: #222326;
+	--ps-subtle: #292b30;
+	--ps-text: #f0f0f1;
+	--ps-muted: #a7aaad;
+	--ps-border: #3b3d42;
+	--ps-hairline: #303238;
 	--ps-hover: rgba(255, 255, 255, 0.07);
 	--ps-input-border: #5c5c5c;
 	--ps-chip-bg: #3a3a3a;
@@ -60,31 +62,68 @@ body {
 	background: var(--ps-canvas);
 }
 
-/* Fixed-height shell (the Snippet Manager gold standard): the sidebar is a
-   full-height column that never scrolls away; the CONTENT pane scrolls. */
-.ps-app { display: flex; height: 100%; overflow: hidden; }
-
-/* Sidebar shell (composing-app-shells: brand / nav / footer) — white like
-   the Snippet Manager, bordered, accent active row. */
-.ps-sidebar {
-	width: 232px;
-	flex-shrink: 0;
+/* Waypoint shell: fixed navigation and topbar, with body regions as the only
+   scroll containers. */
+.ps-app {
+	--ps-sidebar-current: var(--ps-sidebar-width, 304px);
 	display: flex;
-	flex-direction: column;
+	height: 100%;
+	overflow: hidden;
+	background: var(--ps-canvas);
+}
+.ps-app.is-sidebar-collapsed { --ps-sidebar-current: 72px; }
+.ps-skip-link {
+	position: fixed; top: 8px; left: 8px; z-index: 100010; transform: translateY(-160%);
+	padding: 9px 12px; border-radius: 6px; background: var(--ps-text); color: var(--ps-surface); text-decoration: none;
+}
+.ps-skip-link:focus { transform: translateY(0); }
+.ps-sidebar-backdrop,
+.ps-assistant-backdrop { display: none; }
+
+.ps-sidebar {
+	width: var(--ps-sidebar-current);
+	flex-shrink: 0;
+	display: grid;
+	grid-template-rows: auto minmax(0, 1fr) auto;
 	min-height: 0;
 	background: var(--ps-surface);
 	border-right: 1px solid var(--ps-border);
-	position: relative; /* the collapse chevron pins to this */
+	position: relative;
 }
+.ps-sidebar__resize.a8c-ai-chat__resize-handle {
+	left: auto;
+	top: 0;
+	bottom: 0;
+	right: -8px;
+	transform: none;
+	height: auto;
+	width: 16px;
+	justify-content: flex-start !important;
+	z-index: 12;
+	background: transparent;
+}
+.ps-sidebar__resize.a8c-ai-chat__resize-handle::before,
+.ps-assistant__resize.a8c-ai-chat__resize-handle::before {
+	width: 4px; height: 32px; border-radius: 999px; background: var(--ps-accent);
+	opacity: 0; transition: opacity 120ms ease;
+}
+.ps-sidebar__resize.a8c-ai-chat__resize-handle:hover::before,
+.ps-sidebar__resize.a8c-ai-chat__resize-handle:focus-visible::before,
+.ps-sidebar__resize.a8c-ai-chat__resize-handle.is-dragging::before,
+.ps-assistant__resize.a8c-ai-chat__resize-handle:hover::before,
+.ps-assistant__resize.a8c-ai-chat__resize-handle:focus-visible::before,
+.ps-assistant__resize.a8c-ai-chat__resize-handle.is-dragging::before { opacity: 1; }
+.ps-app.is-sidebar-collapsed .ps-sidebar__resize { display: none; }
 
-/* The collapsible rail (composing-app-shells #collapsible-rail): a visible 28px
-   chevron at the top of the sidebar, and — once collapsed — a floating reveal
-   button at the same y, so the way back is never hidden. House metrics, shared
-   with the Snippet Manager and UI Playground. */
+.ps-sidebar__header {
+	position: relative;
+	min-height: 72px;
+	border-bottom: 1px solid var(--ps-border);
+}
 .ps-sidebar-collapse.components-button {
 	position: absolute;
-	top: 10px;
-	right: 10px;
+	top: 22px;
+	right: 12px;
 	z-index: 2;
 	width: 28px;
 	min-width: 28px;
@@ -100,34 +139,67 @@ body {
 	color: var(--ps-text);
 	background: var(--ps-hover);
 }
-.ps-app.is-sidebar-collapsed .ps-sidebar { display: none; }
-/* Clear the floating reveal button so the page heading never sits under it. */
-.ps-app.is-sidebar-collapsed .ps-main { padding-left: 56px; }
-.ps-sidebar-expand.components-button {
-	position: fixed;
-	top: 10px;
-	left: 10px;
-	z-index: 30;
-	background: var(--ps-surface);
-	border: 1px solid var(--ps-border);
-	border-radius: 2px;
+.ps-brand {
+	display: flex; gap: 10px; align-items: center; min-height: 71px; width: 100%; padding: 14px 48px 14px 16px;
+	color: inherit; font: inherit; text-align: left; text-decoration: none;
 }
-
-/* Room for the chevron, so the brand never runs under it. */
-.ps-brand { display: flex; gap: 10px; align-items: center; padding: 20px 48px 20px 16px; }
-.ps-brand__mark { font-size: 22px; }
+.ps-brand:focus-visible,
+.ps-nav button:focus-visible,
+.ps-sidebar__utilities .components-button:focus-visible,
+.ps-journey:focus-visible { outline: 2px solid var(--ps-accent); outline-offset: -2px; }
+.ps-brand__mark { display: block; width: 36px; height: 36px; object-fit: contain; border-radius: 7px; }
 .ps-brand strong { display: block; font-size: 15px; color: var(--ps-text); }
-.ps-brand__sub { font-size: 11px; color: var(--ps-muted); }
-.ps-nav { display: flex; flex-direction: column; gap: 2px; padding: 4px 8px; flex: 1; overflow-y: auto; min-height: 0; }
-.ps-nav button {
-	appearance: none; border: 0; background: none; color: var(--ps-text);
-	text-align: left; padding: 8px 10px; border-radius: 2px; font: inherit; font-size: 13px;
-	cursor: pointer; min-height: 36px;
+.ps-brand__sub { display: block; font-size: 11px; color: var(--ps-muted); }
+.ps-sidebar__body {
+	display: flex; flex-direction: column; min-height: 0; overflow-y: auto; padding: 14px 12px 16px;
+	scrollbar-width: thin; scrollbar-color: transparent transparent;
 }
+.ps-sidebar__body:hover { scrollbar-color: rgba(127, 127, 127, 0.35) transparent; }
+.ps-sidebar__caption,
+.ps-eyebrow {
+	margin: 0; color: var(--ps-muted); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; line-height: 1.4; text-transform: uppercase;
+}
+.ps-sidebar__caption { padding: 0 10px 8px; }
+.ps-nav { display: flex; flex-direction: column; gap: 2px; }
+.ps-nav button {
+	display: flex; align-items: center; gap: 10px; width: 100%;
+	appearance: none; border: 1px solid transparent; background: none; color: var(--ps-text);
+	text-align: left; padding: 8px 10px; border-radius: 8px; font: inherit; font-size: 13px;
+	cursor: pointer; min-height: 38px;
+}
+.ps-nav button svg { flex: 0 0 auto; }
 .ps-nav button:hover { background: var(--ps-hover); }
-.ps-nav button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
+.ps-nav button.is-active {
+	border-color: color-mix(in srgb, var(--ps-accent) 25%, var(--ps-border));
+	background: color-mix(in srgb, var(--ps-accent) 9%, var(--ps-surface));
+	color: var(--ps-accent); font-weight: 600;
+}
+.ps-sidebar__utilities {
+	display: flex; flex-direction: column; gap: 2px; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--ps-border);
+}
+.ps-sidebar__utilities .components-button {
+	justify-content: flex-start; width: 100%; min-height: 36px; height: auto; padding: 7px 10px;
+	border: 0; border-radius: 6px; color: var(--ps-text); font-size: 13px;
+}
+.ps-sidebar__utilities .components-button:hover,
+.ps-sidebar__utilities .components-button.is-active { background: var(--ps-hover); }
+.ps-sidebar__utilities .ps-utility--ask.components-button {
+	background: var(--ps-text); color: var(--ps-surface); font-weight: 600;
+}
+.ps-sidebar__utilities .ps-utility--ask.components-button:hover { background: color-mix(in srgb, var(--ps-text) 88%, var(--ps-surface)); color: var(--ps-surface); }
+.ps-tip {
+	margin-top: 16px; padding: 14px; border: 1px solid color-mix(in srgb, var(--ps-accent) 22%, var(--ps-border));
+	border-radius: 10px; background: var(--ps-accent-soft);
+}
+.ps-tip__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ps-tip__head .components-button { min-width: 0; height: 24px; padding: 0 4px; font-size: 11px; }
+.ps-tip > strong { display: block; margin-top: 8px; font-size: 13px; }
+.ps-tip > p:last-child,
+.ps-insights p { margin: 5px 0 0; color: var(--ps-muted); font-size: 11px; line-height: 1.5; }
+.ps-insights { margin-top: 10px; padding: 10px 12px; border: 1px solid var(--ps-border); border-radius: 8px; }
+.ps-insights summary { cursor: pointer; font-size: 12px; font-weight: 600; }
 .ps-sidebar__footer {
-	padding: 12px 16px;
+	padding: 14px 16px;
 	border-top: 1px solid var(--ps-border);
 	font-size: 11px;
 	color: var(--ps-muted);
@@ -135,6 +207,46 @@ body {
 	flex-direction: column;
 	gap: 10px;
 }
+.ps-local-profile { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; color: var(--ps-text); }
+.ps-local-profile span:last-child { min-width: 0; }
+.ps-local-profile small,
+.ps-local-profile strong { display: block; }
+.ps-local-profile small { color: var(--ps-muted); font-size: 10px; }
+.ps-local-profile strong { margin-top: 2px; font-size: 12px; }
+.ps-local-profile__avatar {
+	display: flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+	background: var(--ps-chip-bg); color: var(--ps-accent); font-size: 12px; font-weight: 700;
+}
+.ps-appearance {
+	display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%;
+	padding: 8px 10px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; cursor: pointer;
+}
+.ps-appearance:hover,
+.ps-appearance:focus-visible { background: var(--ps-hover); }
+.ps-appearance__copy small,
+.ps-appearance__copy strong { display: block; }
+.ps-appearance__copy small { font-size: 10px; color: var(--ps-muted); }
+.ps-appearance__copy strong { margin-top: 2px; color: var(--ps-text); font-size: 12px; }
+.ps-appearance__select { min-width: 96px; }
+.ps-app-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
+.ps-app-meta strong { color: var(--ps-text); }
+
+.ps-app.is-sidebar-collapsed .ps-sidebar__header { min-height: 104px; }
+.ps-app.is-sidebar-collapsed .ps-brand { min-height: 70px; justify-content: center; padding: 14px 18px; }
+.ps-app.is-sidebar-collapsed .ps-brand__copy,
+.ps-app.is-sidebar-collapsed .ps-sidebar__caption,
+.ps-app.is-sidebar-collapsed .ps-nav__label,
+.ps-app.is-sidebar-collapsed .ps-utility__label,
+.ps-app.is-sidebar-collapsed .ps-tip,
+.ps-app.is-sidebar-collapsed .ps-insights,
+.ps-app.is-sidebar-collapsed .ps-local-profile span,
+.ps-app.is-sidebar-collapsed .ps-appearance,
+.ps-app.is-sidebar-collapsed .ps-app-meta { display: none; }
+.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button { top: 69px; left: 22px; right: auto; }
+.ps-app.is-sidebar-collapsed .ps-sidebar__body { padding-left: 8px; padding-right: 8px; }
+.ps-app.is-sidebar-collapsed .ps-nav button,
+.ps-app.is-sidebar-collapsed .ps-sidebar__utilities .components-button { justify-content: center; padding-left: 8px; padding-right: 8px; }
+.ps-app.is-sidebar-collapsed .ps-local-profile { justify-content: center; }
 
 /* System | Light | Dark segmented switcher. */
 .ps-themeswitch { display: flex; border: 1px solid var(--ps-border); border-radius: 6px; overflow: hidden; }
@@ -146,12 +258,135 @@ body {
 .ps-themeswitch button:hover { background: var(--ps-hover); color: var(--ps-text); }
 .ps-themeswitch button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
 
-.ps-main { flex: 1; min-width: 0; padding: 28px 32px 48px; background: var(--ps-canvas); overflow-y: auto; min-height: 0; }
+.ps-main-column {
+	display: grid; grid-template-rows: 72px minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0;
+}
+.ps-topbar {
+	display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 0;
+	padding: 0 28px; border-bottom: 1px solid var(--ps-border); background: var(--ps-surface);
+}
+.ps-topbar__title { min-width: 0; }
+.ps-topbar__title h1 { margin: 2px 0 0; overflow: hidden; color: var(--ps-text); font-size: 20px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
+.ps-topbar__actions { display: flex; align-items: center; gap: 14px; }
+.ps-readiness { display: flex; align-items: center; gap: 7px; color: var(--ps-muted); font-size: 12px; white-space: nowrap; }
+.ps-readiness > span { width: 7px; height: 7px; border-radius: 50%; background: var(--ps-muted); }
+.ps-readiness.is-ready > span { background: #00a32a; }
+.ps-readiness.is-error > span { background: #d63638; }
+.ps-mobile-menu.components-button { display: none; }
+.ps-main { min-width: 0; min-height: 0; padding: 32px 36px 56px; background: var(--ps-canvas); overflow-y: auto; }
+.ps-main > * { width: 100%; max-width: 1120px; margin-left: auto; margin-right: auto; }
 
-.ps-section { max-width: 1040px; }
+.ps-assistant-shell {
+	position: relative; width: min(var(--ps-assistant-width, 400px), 42vw); flex: 0 0 auto; min-width: 320px; min-height: 0;
+	display: flex; z-index: 20;
+	background: var(--ps-surface);
+	border-left: 1px solid var(--ps-border);
+}
+.ps-assistant__resize.a8c-ai-chat__resize-handle {
+	left: -1px; right: auto; top: 0; bottom: 0; transform: none; height: auto; width: 16px; justify-content: flex-start; z-index: 4; background: transparent;
+}
+.ps-assistant__resize.a8c-ai-chat__resize-handle::before { margin-left: 8px; }
+.ps-assistant { width: 100%; min-width: 0; min-height: 0; display: flex; }
+.ps-assistant.a8c-ai-chat {
+	height: 100%;
+	border-top: 0;
+	border-right: 0;
+	border-bottom: 0;
+}
+
+.ps-section { max-width: 1120px; }
 .ps-section__head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
 .ps-section__head h2 { margin: 0; font-size: 20px; }
 .ps-section__actions { display: flex; gap: 8px; align-items: center; }
+
+.ps-overview { max-width: 1120px; }
+.ps-overview__hero {
+	display: flex; align-items: flex-end; justify-content: space-between; gap: 28px; min-height: 208px;
+	padding: 32px 36px; border: 1px solid color-mix(in srgb, var(--ps-accent) 18%, var(--ps-border));
+	border-radius: 18px; background: var(--ps-accent-soft);
+}
+.ps-overview__kicker { margin: 0 0 10px; color: var(--ps-accent); font-size: 10px; font-weight: 700; letter-spacing: 0.1em; }
+.ps-overview__hero h2 { max-width: 800px; margin: 0; font-size: clamp(30px, 4vw, 46px); font-weight: 700; line-height: 1.06; letter-spacing: -0.035em; }
+.ps-overview__hero > div > p:last-child { max-width: 680px; margin: 14px 0 0; color: var(--ps-muted); font-size: 16px; line-height: 1.55; }
+.ps-overview__hero > .components-button { flex: 0 0 auto; }
+.ps-quick-start { margin: 32px 0 40px; }
+.ps-section-heading { margin-bottom: 14px; }
+.ps-section-heading h2 { margin: 3px 0 0; font-size: 20px; line-height: 1.25; }
+.ps-journeys { display: grid; gap: 10px; }
+.ps-journey {
+	display: grid; grid-template-columns: 38px minmax(0, 1fr) auto 16px; align-items: center; gap: 14px;
+	width: 100%; padding: 16px; border: 1px solid var(--ps-border); border-radius: 10px;
+	background: var(--ps-surface); color: var(--ps-text); font: inherit; text-align: left; cursor: pointer;
+}
+.ps-journey:hover { border-color: color-mix(in srgb, var(--ps-accent) 45%, var(--ps-border)); background: var(--ps-hover); }
+.ps-journey.is-primary { border-color: color-mix(in srgb, var(--ps-accent) 38%, var(--ps-border)); background: color-mix(in srgb, var(--ps-accent) 6%, var(--ps-surface)); }
+.ps-journey__number { display: grid; place-items: center; width: 32px; height: 32px; border: 1px solid currentColor; border-radius: 50%; color: var(--ps-accent); font-size: 11px; font-weight: 700; }
+.ps-journey strong,
+.ps-journey small { display: block; }
+.ps-journey strong { font-size: 14px; }
+.ps-journey small { margin-top: 4px; color: var(--ps-muted); font-size: 12px; line-height: 1.45; }
+.ps-journey__path { color: var(--ps-muted); font-size: 11px; white-space: nowrap; }
+.ps-journey__arrow { color: var(--ps-muted); font-size: 18px; }
+.ps-settings-group { display: grid; gap: 10px; max-width: 760px; }
+.ps-conversation-form {
+	display: grid;
+	width: min(760px, 100%);
+	gap: 20px;
+	margin: 20px 0 28px;
+	padding: 20px;
+	border: 1px solid var(--ps-border);
+	border-radius: 10px;
+	background: var(--ps-surface);
+}
+.ps-conversational-field { display: grid; width: 100%; gap: 10px; }
+.ps-conversational-field__prompt { display: grid; gap: 4px; }
+.ps-conversational-field__label { color: var(--ps-text); font-size: 15px; font-weight: 600; line-height: 1.4; }
+.ps-conversational-field__prompt p {
+	margin: 0; color: var(--ps-muted); font-size: 13px; line-height: 1.5;
+}
+.ps-conversational-field__control,
+.ps-conversational-field__control > input,
+.ps-conversational-field__control > textarea,
+.ps-conversational-field__control .components-base-control,
+.ps-conversational-field__control .components-base-control__field,
+.ps-conversational-field__control .components-custom-select-control { width: 100%; }
+.ps-conversational-field__control .components-base-control { margin-bottom: 0; }
+.ps-conversational-field__control .ps-search,
+.ps-conversational-field__control .ps-portinput { width: 100%; min-width: 0; }
+.ps-field-options { padding-top: 2px; }
+.ps-field-options > summary { width: fit-content; color: var(--ps-text); font-size: 13px; font-weight: 600; cursor: pointer; }
+.ps-field-options[open] > summary { margin-bottom: 14px; }
+.ps-field-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.ps-field-context { margin: 0; color: var(--ps-muted); font-size: 13px; }
+.ps-field-context strong { color: var(--ps-text); font-family: SFMono-Regular, Menlo, Consolas, monospace; }
+.ps-expert-field { max-width: none; padding: 14px; }
+
+/* Activity is a monitoring surface, so its log consumes the content pane
+   instead of stopping at the shared 320px log cap. The log itself scrolls
+   while the page heading, health chips, and retention note stay visible. */
+.ps-section--activity {
+	max-width: none;
+	height: calc(100vh - 76px);
+	display: flex;
+	flex-direction: column;
+	min-height: 0;
+}
+.ps-section--activity .ps-section__head,
+.ps-section--activity .ps-dnsrow,
+.ps-section--activity .components-notice,
+.ps-section--activity .ps-hint { flex-shrink: 0; }
+.ps-section--activity .ps-log {
+	flex: 1;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	margin-top: 0;
+}
+.ps-section--activity .ps-log pre {
+	flex: 1;
+	min-height: 0;
+	max-height: none;
+}
 
 .ps-search {
 	height: 40px; padding: 0 12px; border: 1px solid var(--ps-input-border); border-radius: 2px;
@@ -169,7 +404,7 @@ body {
 
 .ps-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; margin-top: 20px; }
 .ps-statcard {
-	appearance: none; border: 1px solid var(--ps-border); background: var(--ps-surface); border-radius: 8px;
+	appearance: none; border: 1px solid var(--ps-border); background: var(--ps-surface); border-radius: 10px;
 	padding: 20px; text-align: left; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
 	color: var(--ps-text);
 }
@@ -178,7 +413,7 @@ body {
 .ps-statcard__label { font-size: 13px; font-weight: 600; }
 .ps-statcard__sub { font-size: 12px; color: var(--ps-muted); }
 
-.ps-table { width: 100%; border-collapse: collapse; background: var(--ps-surface); border: 1px solid var(--ps-border); border-radius: 8px; overflow: hidden; }
+.ps-table { width: 100%; border-collapse: collapse; background: var(--ps-surface); border: 1px solid var(--ps-border); border-radius: 10px; overflow: hidden; }
 .ps-table th, .ps-table td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--ps-hairline); font-size: 13px; }
 .ps-table th { background: var(--ps-subtle); font-size: 11px; text-transform: uppercase; letter-spacing: 0.02em; color: var(--ps-muted); }
 .ps-table tr:last-child td { border-bottom: 0; }
@@ -210,7 +445,7 @@ body {
 
 .ps-dnsrow { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 20px; }
 
-.ps-log { margin-top: 20px; border: 1px solid var(--ps-border); border-radius: 8px; background: var(--ps-surface); overflow: hidden; }
+.ps-log { margin-top: 20px; border: 1px solid var(--ps-border); border-radius: 10px; background: var(--ps-surface); overflow: hidden; }
 .ps-log__head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 8px 14px; border-bottom: 1px solid var(--ps-border); background: var(--ps-subtle); }
 .ps-log__head .components-button + .components-button { margin-left: 6px; }
 .ps-log pre { margin: 0; padding: 14px; font-size: 12px; max-height: 320px; overflow: auto; }
@@ -229,6 +464,20 @@ body {
 .ps-editlist li { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .ps-editlist code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 
+/* Browser reach: the proxy hop between a correctly served domain and a
+   working browser. One card so the suffix verdicts and the fix that changes
+   them read as a single group, not three stray rows under the table. */
+.ps-proxyreach {
+	border: 1px solid var(--ps-border); border-radius: 8px;
+	padding: 20px; margin-bottom: 8px;
+}
+.ps-proxyreach .ps-dnsrow { margin-bottom: 16px; }
+.ps-proxyreach .ps-hint { margin: 20px 0 0; }
+.ps-proxyreach .ps-field-actions { margin-top: 20px; }
+.ps-suffixlist { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.ps-suffixlist li { display: flex; align-items: center; gap: 12px; }
+.ps-suffixlist .ps-mono { min-width: 120px; }
+
 /* Second-level heading inside a section (e.g. the observed-domains block
    under Ingress) — with the 24px group spacing above. */
 .ps-subhead { margin: 28px 0 16px; font-size: 15px; }
@@ -240,29 +489,88 @@ body {
 	gap: 16px; margin: 28px 0 16px;
 }
 .ps-subhead-row .ps-subhead--flush { margin: 0; }
+.ps-subhead-actions { display: flex; align-items: center; gap: 8px; }
 
-/* Copy confirmations, clear of the sidebar (232px) and the content edge. */
-.ps-notices { position: fixed; bottom: 24px; left: 256px; z-index: 100000; }
+/* Copy confirmations, clear of the current sidebar width and content edge. */
+.ps-notices { position: fixed; bottom: 24px; left: calc(var(--ps-sidebar-current) + 24px); z-index: 100000; }
 .ps-notices .components-snackbar-list { position: static; }
 
+@media (max-width: 1040px) {
+	.ps-assistant-backdrop {
+		display: block; position: fixed; inset: 0; z-index: 39; border: 0;
+		background: rgba(0, 0, 0, 0.32); cursor: default;
+	}
+	.ps-assistant-shell {
+		position: fixed; inset: 0 0 0 auto; z-index: 40;
+		width: min(var(--ps-assistant-width, 400px), 92vw); max-width: 560px;
+	}
+}
+
 @media (max-width: 760px) {
+	.ps-app { --ps-sidebar-current: 0px; }
 	.ps-notices { left: 16px; right: 16px; bottom: 16px; }
-	.ps-app { flex-direction: column; }
-	.ps-sidebar { width: 100%; flex-direction: row; align-items: center; border-right: 0; border-bottom: 1px solid var(--ps-border); }
-	.ps-nav { flex-direction: row; overflow-x: auto; }
-	.ps-sidebar__footer { display: none; }
-	.ps-main { padding: 16px; }
-	/* Narrow screens already stack the nav into a bar; collapsing it would leave
-	   no way to navigate, so the toggle stands down here. */
-	.ps-sidebar-collapse, .ps-sidebar-expand { display: none; }
-	.ps-app.is-sidebar-collapsed .ps-sidebar { display: flex; }
-	.ps-app.is-sidebar-collapsed .ps-main { padding: 16px; }
+	.ps-sidebar {
+		position: fixed; inset: 0 auto 0 0; z-index: 60; width: min(304px, 86vw);
+		transform: translateX(-105%); transition: transform 180ms ease; box-shadow: none;
+	}
+	.ps-app.is-mobile-nav-open .ps-sidebar { transform: translateX(0); }
+	.ps-app.is-mobile-nav-open .ps-sidebar-backdrop {
+		display: block; position: fixed; inset: 0; z-index: 59; border: 0;
+		background: rgba(0, 0, 0, 0.34);
+	}
+	.ps-sidebar__resize.a8c-ai-chat__resize-handle,
+	.ps-assistant__resize.a8c-ai-chat__resize-handle { display: none; }
+	.ps-app.is-sidebar-collapsed .ps-sidebar__header { min-height: 72px; }
+	.ps-app.is-sidebar-collapsed .ps-brand { min-height: 71px; justify-content: flex-start; padding: 14px 48px 14px 16px; }
+	.ps-app.is-sidebar-collapsed .ps-brand__copy,
+	.ps-app.is-sidebar-collapsed .ps-sidebar__caption,
+	.ps-app.is-sidebar-collapsed .ps-nav__label,
+	.ps-app.is-sidebar-collapsed .ps-utility__label,
+	.ps-app.is-sidebar-collapsed .ps-tip,
+	.ps-app.is-sidebar-collapsed .ps-insights,
+	.ps-app.is-sidebar-collapsed .ps-local-profile span,
+	.ps-app.is-sidebar-collapsed .ps-appearance,
+	.ps-app.is-sidebar-collapsed .ps-app-meta { display: initial; }
+	.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button { top: 22px; left: auto; right: 12px; }
+	.ps-app.is-sidebar-collapsed .ps-sidebar__body { padding: 14px 12px 16px; }
+	.ps-app.is-sidebar-collapsed .ps-nav button,
+	.ps-app.is-sidebar-collapsed .ps-sidebar__utilities .components-button { justify-content: flex-start; padding-left: 10px; padding-right: 10px; }
+	.ps-app.is-sidebar-collapsed .ps-local-profile { justify-content: flex-start; }
+	.ps-mobile-menu.components-button { display: inline-flex; flex: 0 0 auto; }
+	.ps-mobile-menu.components-button { color: var(--ps-text); background: var(--ps-subtle); }
+	.ps-main-column { grid-template-rows: 64px minmax(0, 1fr); }
+	.ps-topbar { padding: 0 12px; gap: 10px; }
+	.ps-topbar__title { flex: 1; }
+	.ps-topbar__title h1 { font-size: 17px; }
+	.ps-topbar__actions { gap: 8px; }
+	.ps-readiness { display: none; }
+	.ps-topbar__actions .components-button { padding-left: 10px; padding-right: 10px; white-space: nowrap; }
+	.ps-main { padding: 20px 16px 44px; }
+	.ps-overview__hero { align-items: flex-start; flex-direction: column; min-height: 0; padding: 26px 22px; }
+	.ps-overview__hero h2 { font-size: clamp(28px, 9vw, 38px); }
+	.ps-overview__hero > .components-button { align-self: stretch; justify-content: center; }
+	.ps-journey { grid-template-columns: 38px minmax(0, 1fr) 16px; }
+	.ps-journey__path { display: none; }
+	.ps-section__head,
+	.ps-subhead-row { align-items: flex-start; flex-direction: column; }
+	.ps-section__actions,
+	.ps-subhead-actions { flex-wrap: wrap; }
+	.ps-section--activity { height: auto; min-height: calc(100vh - 104px); }
+	.ps-section--activity .ps-log { min-height: 50vh; }
+	.ps-assistant-shell { inset: 0; width: 100%; max-width: none; min-width: 0; border-left: 0; }
+	.ps-assistant { width: 100%; }
+	.ps-addrow { align-items: stretch; flex-direction: column; }
+	.ps-conversation-form { width: 100%; padding: 16px; }
+	.ps-suffixfield { width: 100%; }
+	.ps-suffixfield input { flex: 1; min-width: 0; }
+	.ps-suffixfield .ps-suffix-select { flex: 0 0 auto; }
+	.ps-addrow .ps-portinput { width: 100%; }
 }
 
 /* Ingress management: the add row and the fixed .test suffix field. */
 .ps-addrow { display: flex; gap: 8px; align-items: center; margin: 20px 0; }
 .ps-suffixfield {
-	display: flex; align-items: center; height: 40px;
+	display: flex; align-items: center; width: 100%; height: 40px;
 	border: 1px solid var(--ps-input-border); border-radius: 2px; background: var(--ps-surface);
 	overflow: hidden;
 }
@@ -276,19 +584,34 @@ body {
 	padding: 0 12px 0 2px; color: var(--ps-muted); font-size: 13px;
 	font-family: SFMono-Regular, Menlo, Consolas, monospace;
 }
-/* TLD picker sitting where the fixed .test suffix used to be — a borderless
-   select flush inside the field, so name + suffix read as one control. */
-.ps-suffixfield select {
-	appearance: none; border: 0; outline: none; height: 100%; cursor: pointer;
-	padding: 0 26px 0 6px; color: var(--ps-muted); font-size: 13px;
-	background: transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%23757575'%3E%3Cpath d='M5.5 8l4.5 4.5L14.5 8z'/%3E%3C/svg%3E") no-repeat right 6px center;
-	background-size: 14px;
+/* Custom TLD popover sitting where the fixed .test suffix used to be. */
+.ps-suffix-select { min-width: 140px; }
+.ps-suffix-select button { min-height: 40px; }
+.ps-suffixfield .ps-suffix-select {
+	align-self: stretch;
+	height: 100%;
+	min-width: 76px;
+}
+.ps-suffixfield .ps-suffix-select > div {
+	height: 100%;
+	min-height: 0;
+	border: 0 !important;
+	border-left: 1px solid var(--ps-border) !important;
+	border-radius: 0 !important;
+	outline: 0 !important;
+	box-shadow: none !important;
+}
+.ps-suffixfield .ps-suffix-select button {
+	height: 100%;
+	min-height: 0;
+	border: 0;
+	border-radius: 0;
+	background: transparent;
+	color: var(--ps-muted);
 	font-family: SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: 13px;
 }
-:root[data-theme='dark'] .ps-suffixfield select {
-	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='%239a9a9a'%3E%3Cpath d='M5.5 8l4.5 4.5L14.5 8z'/%3E%3C/svg%3E");
-}
-.ps-suffixfield select:focus { color: var(--ps-text); }
+.ps-suffixfield .ps-suffix-select button:focus-visible { color: var(--ps-text); }
 .ps-portinput { min-width: 90px; width: 90px; font-family: SFMono-Regular, Menlo, Consolas, monospace; }
 .ps-command { cursor: pointer; font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 .ps-command:hover { color: var(--ps-accent); }
@@ -309,8 +632,8 @@ body {
 
 /* DataViews everywhere: breathing room after every view (Daniel's spacing
    rule — tables/views always get space below). */
-.ps-dataviews { margin-bottom: 24px; border: 1px solid var(--ps-border); border-radius: 8px; background: var(--ps-surface); }
-.ps-dataviews .dataviews-wrapper { border-radius: 8px; }
+.ps-dataviews { margin-bottom: 24px; border: 1px solid var(--ps-border); border-radius: 10px; background: var(--ps-surface); }
+.ps-dataviews .dataviews-wrapper { border-radius: 10px; }
 /* Cells wrap instead of forcing the table to scroll sideways (Daniel's
    rule: wrapped text over horizontal scroll). */
 .ps-dataviews .dataviews-view-table th,
@@ -323,4 +646,20 @@ body {
 :root[data-theme='dark'] .ps-dataviews .dataviews-view-table td,
 :root[data-theme='dark'] .ps-dataviews .dataviews-view-table th {
 	border-color: var(--ps-hairline);
+}
+:root[data-theme='dark'] .ps-dataviews .dataviews-wrapper,
+:root[data-theme='dark'] .ps-dataviews .dataviews__view-actions,
+:root[data-theme='dark'] .ps-dataviews .dataviews-layout__container,
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table,
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table__row,
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table__actions-column,
+:root[data-theme='dark'] .ps-dataviews .components-input-control__container {
+	background-color: var(--ps-surface);
+	color: var(--ps-text);
+}
+:root[data-theme='dark'] .ps-dataviews .components-input-control__input,
+:root[data-theme='dark'] .ps-dataviews .components-button,
+:root[data-theme='dark'] .ps-dataviews .dataviews-view-table__cell-content-wrapper,
+:root[data-theme='dark'] .ps-dataviews .ps-mono {
+	color: var(--ps-text);
 }

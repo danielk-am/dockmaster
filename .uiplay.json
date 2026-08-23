@@ -1,0 +1,147 @@
+{
+  "schema": "wpds-app-uiplay/v1",
+  "app": {
+    "title": "Dockmaster",
+    "overview_route": "overview",
+    "identity": {
+      "type": "generated-app-mark",
+      "label": "Dockmaster",
+      "fallback": "deterministic-app-mark"
+    },
+    "style": {
+      "id": "waypoint",
+      "version": "1.1.0"
+    }
+  },
+  "routes": [
+    { "id": "overview", "path": "/", "layout": "app-shell" },
+    { "id": "ingress", "path": "/ingress", "layout": "app-shell" },
+    { "id": "tlds", "path": "/tlds", "layout": "app-shell" },
+    { "id": "ports", "path": "/ports", "layout": "app-shell" },
+    { "id": "services", "path": "/services", "layout": "app-shell" },
+    { "id": "remote", "path": "/remote", "layout": "app-shell" },
+    { "id": "dns", "path": "/dns", "layout": "app-shell" },
+    { "id": "activity", "path": "/activity", "layout": "app-shell" },
+    { "id": "help", "path": "/help", "layout": "app-shell" },
+    { "id": "settings", "path": "/settings", "layout": "app-shell" }
+  ],
+  "shell": {
+    "type": "app-shell",
+    "surface": "near-white",
+    "header": {
+      "fixed": true,
+      "component": "route-topbar",
+      "primary_action": "register-domain"
+    },
+    "sidebar": {
+      "resize_handle": "component:left-panel-resize-handle",
+      "header": {
+        "fixed": true,
+        "component": "app-identity-link",
+        "to": "route:overview",
+        "logo": {
+          "source": "generated-app-mark",
+          "fallback": "deterministic-app-mark"
+        }
+      },
+      "body": {
+        "component": "sidebar-stack",
+        "scroll": "hover",
+        "main_nav": {
+          "component": "journey-nav",
+          "semantics": "stable-routes-without-ordinals",
+          "items": ["overview", "ingress", "tlds", "ports", "services", "remote", "dns", "activity"]
+        },
+        "below_main_nav": {
+          "component": "assistant-support-stack",
+          "actions": [
+            { "id": "ask", "type": "assistant-action", "style": "primary", "availability": "available" },
+            { "id": "help-feedback", "type": "sidebar-utility-action", "style": "quiet" },
+            { "id": "app-settings", "type": "sidebar-utility-action", "style": "quiet" }
+          ],
+          "intelligence": [
+            { "id": "tip", "type": "ai-tip-card" },
+            { "id": "insights", "type": "ai-insights" }
+          ]
+        }
+      },
+      "footer": {
+        "fixed": true,
+        "component": "identity-utility-footer",
+        "profile": {
+          "component": "editable-profile-control",
+          "profile_source": "runtime-local-profile",
+          "label": "local-profile",
+          "persistence": "local-storage",
+          "resolver": "@1dr0/wpds-identity@0.5.0"
+        },
+        "local_profile": {
+          "component": "local-profile",
+          "control": "editable-profile-control",
+          "user_source": "current-user",
+          "profile_source": "runtime-local-profile",
+          "persistence": "local-storage",
+          "resolver": "@1dr0/wpds-identity@0.5.0",
+          "avatar_fallback": "deterministic-profile-avatar"
+        },
+        "documentation": {
+          "component": "documentation-links",
+          "items": ["changelog", "readme", "api-reference"],
+          "availability": "unavailable",
+          "reason": "Repository Markdown and a public API reference are not served by this loopback host."
+        },
+        "items": ["appearance", "documentation", "version"]
+      }
+    },
+    "assistant_panel": {
+      "component": "wpds/ask-ai",
+      "availability": "available",
+      "resize_handle": "component:right-panel-resize-handle"
+    }
+  },
+  "overview": {
+    "source": "src/App.jsx",
+    "schema": "overview-journeys/v1",
+    "hero": "rotating-journey",
+    "quick_start": "numbered-product-journeys",
+    "returning_context": "machine-snapshot"
+  },
+  "components": [
+    { "id": "journey-timeline", "type": "timeline", "availability": "not-used-by-current-overview" },
+    { "id": "journey-button", "type": "numbered-journey-button" },
+    { "id": "section-header", "type": "collapsible-section-header", "availability": "reserved" },
+    { "id": "ask", "type": "assistant-action" },
+    { "id": "help-feedback", "type": "sidebar-utility-action" },
+    { "id": "app-settings", "type": "sidebar-utility-action" },
+    { "id": "tip", "type": "ai-tip-card" },
+    { "id": "insights", "type": "ai-insights" },
+    { "id": "tld-popover", "type": "custom-popover-select" },
+    { "id": "appearance-popover", "type": "custom-popover-select" },
+    {
+      "id": "left-panel-resize-handle",
+      "type": "resize-handle",
+      "class_name": "left-panel-resize-handle",
+      "owns": "sidebar",
+      "edge": "inline-end",
+      "hit_target": "full-height-border",
+      "target_placement": "straddles-divider",
+      "grip_placement": "inside-panel",
+      "visibility": "matching-border-hover-focus-drag",
+      "range": { "min": 240, "max": 400, "default": 304, "step": 16 },
+      "mobile": "hidden"
+    },
+    {
+      "id": "right-panel-resize-handle",
+      "type": "resize-handle",
+      "class_name": "right-panel-resize-handle",
+      "owns": "assistant-panel",
+      "edge": "inline-start",
+      "hit_target": "full-height-border",
+      "target_placement": "inside-panel-from-divider",
+      "grip_placement": "eight-pixels-inside-panel",
+      "visibility": "matching-border-hover-focus-drag",
+      "range": { "min": 320, "max": 560, "default": 400, "step": 16 },
+      "mobile": "hidden"
+    }
+  ]
+}

@@ -1,11 +1,33 @@
 // Dockmaster — the app shell (composing-app-shells: brand header, nav,
 // version footer) around the views + management of local dev infra.
-import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
 import { DataViews, filterSortAndPaginate } from '@wordpress/dataviews';
-import { chevronLeft, menu } from '@wordpress/icons';
+import {
+  Icon,
+  chevronLeft,
+  cloud,
+  cog,
+  commentContent,
+  globe,
+  help,
+  home,
+  link,
+  menu,
+  navigation,
+  plugins,
+  scheduled,
+  seen,
+} from '@wordpress/icons';
+import { AiChatResizeHandle, PopoverSelect } from '@1dr0/ai-chat';
+import { generatedIdentityImage, mountEditableProfile, mountEditableProfilePage } from '@1dr0/wpds-identity';
+import '@1dr0/wpds-identity/styles.css';
+import AssistantPanel from './AssistantPanel.jsx';
+import ConversationalField from './ConversationalField.jsx';
+import { apiGet } from './api.mjs';
 
-const VERSION = '2.6.0';
+const VERSION = '2.14.0';
+const DOCKMASTER_MARK = generatedIdentityImage('mark', 'Dockmaster');
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -15,9 +37,42 @@ const NAV = [
   { id: 'services', label: 'Services' },
   { id: 'remote', label: 'Remote services' },
   { id: 'dns', label: 'DNS chain' },
+  { id: 'activity', label: 'Activity' },
 ];
 
-const get = (p) => fetch(`/api/${p}`).then((r) => r.json());
+const NAV_ICONS = { overview: home, ingress: globe, tlds: navigation, ports: link, services: plugins, remote: cloud, dns: seen, activity: scheduled };
+
+const PAGE_META = {
+  overview: { eyebrow: 'Local infrastructure', title: 'Overview' },
+  ingress: { eyebrow: 'Routing', title: 'Ingress & Domains' },
+  tlds: { eyebrow: 'Name resolution', title: 'Vanity TLDs' },
+  ports: { eyebrow: 'Network', title: 'Ports' },
+  services: { eyebrow: 'Processes', title: 'Services' },
+  remote: { eyebrow: 'Remote infrastructure', title: 'Remote services' },
+  dns: { eyebrow: 'Name resolution', title: 'DNS chain' },
+  activity: { eyebrow: 'Operations', title: 'Activity' },
+  help: { eyebrow: 'Dockmaster', title: 'Help & Feedback' },
+  settings: { eyebrow: 'Dockmaster', title: 'App settings' },
+  profile: { eyebrow: 'Profile settings', title: 'Profile' },
+};
+
+const OVERVIEW_HEROES = [
+  {
+    kicker: 'SEE THE WHOLE LOCAL PATH',
+    title: 'Know which service owns an address before you change anything.',
+    support: 'Dockmaster connects local domains, ports, launchd services, and DNS into one inspectable path.',
+  },
+  {
+    kicker: 'WORK FROM EVIDENCE',
+    title: 'Trace the request from name resolution to the process answering it.',
+    support: 'Start with the symptom, follow each layer, then use the narrow control that owns the fix.',
+  },
+  {
+    kicker: 'KEEP LOCAL INFRASTRUCTURE RECOVERABLE',
+    title: 'Review state first, stage changes, and keep privileged work bounded.',
+    support: 'The interface separates observation, user-owned changes, and validated privileged application.',
+  },
+];
 
 // Transient feedback lives in one place (the Snippet Manager's idiom): any
 // screen calls notify(), the app renders the snackbar stack, success clears
@@ -33,12 +88,48 @@ const useNotify = () => useContext(NotifyContext);
 const THEME_KEY = 'dockmaster-theme';
 const THEMES = ['system', 'light', 'dark'];
 
-// Sidebar collapse (composing-app-shells #collapsible-rail): every house shell
-// carries a visible collapse toggle, and the choice persists. These nav rows are
-// labels with no icons, so collapsing hides the column outright and leaves the
-// floating reveal button at the same y position, rather than shrinking to an
-// icons-only rail that would have nothing to show.
+// Waypoint uses a resizable 304px sidebar and a persistent 72px icon rail.
 const SIDEBAR_KEY = 'dockmaster-sidebar-collapsed';
+const SIDEBAR_WIDTH_KEY = 'dockmaster-sidebar-width-waypoint';
+const SIDEBAR_WIDTH_MIN = 240;
+const SIDEBAR_WIDTH_MAX = 400;
+const SIDEBAR_WIDTH_DEFAULT = 304;
+const TIP_KEY = 'dockmaster-waypoint-tip-dismissed';
+
+function FooterProfile({ onOpen }) {
+  const host = useRef(null);
+  useEffect(() => {
+    if (!host.current) return undefined;
+    return mountEditableProfile(host.current, {
+      appId: 'dockmaster',
+      profile: { displayName: 'Local operator', secondary: 'Local infrastructure' },
+      onOpen,
+    }).destroy;
+  }, [onOpen]);
+  return <div ref={host} className="ps-local-profile" />;
+}
+
+function ProfilePage({ onDone }) {
+  const host = useRef(null);
+  useEffect(() => {
+    if (!host.current) return undefined;
+    return mountEditableProfilePage(host.current, {
+      appId: 'dockmaster',
+      profile: { displayName: 'Local operator', secondary: 'Local infrastructure' },
+      title: 'Dockmaster profile',
+      description: 'Choose the local identity shown in Dockmaster.',
+      onCancel: onDone,
+      onSaved: onDone,
+    }).destroy;
+  }, [onDone]);
+  return <div ref={host} className="ps-profile-page" />;
+}
+
+const boundSidebarWidth = (value) => Math.min(SIDEBAR_WIDTH_MAX, Math.max(SIDEBAR_WIDTH_MIN, Number(value) || SIDEBAR_WIDTH_DEFAULT));
+
+function readSidebarWidth() {
+  return boundSidebarWidth(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+}
 
 function useTheme() {
   const [pref, setPref] = useState(() => {
@@ -62,11 +153,26 @@ function ThemeSwitch({ pref, onChange }) {
   return (
     <div className="ps-themeswitch" role="group" aria-label="Theme">
       {THEMES.map((t) => (
-        <button key={t} className={pref === t ? 'is-active' : ''} onClick={() => onChange(t)}>
+        <button
+          key={t}
+          type="button"
+          className={pref === t ? 'is-active' : ''}
+          aria-pressed={pref === t}
+          onClick={() => onChange(t)}
+        >
           {t[0].toUpperCase() + t.slice(1)}
         </button>
       ))}
     </div>
+  );
+}
+
+function AppearanceShortcut({ pref, onOpen }) {
+  return (
+    <button type="button" className="ps-appearance" onClick={onOpen}>
+      <span className="ps-appearance__copy"><small>Appearance</small><strong>{pref[0].toUpperCase() + pref.slice(1)}</strong></span>
+      <span aria-hidden="true">›</span>
+    </button>
   );
 }
 
@@ -75,7 +181,7 @@ function useApi(path, deps = []) {
   const [error, setError] = useState(null);
   const reload = useCallback(() => {
     setError(null);
-    get(path).then(setData).catch((e) => setError(String(e)));
+    apiGet(path).then(setData).catch((e) => setError(String(e)));
   }, [path]);
   useEffect(reload, deps); // eslint-disable-line react-hooks/exhaustive-deps
   return { data, error, reload };
@@ -200,9 +306,9 @@ function SudoSteps({ intro, command }) {
   );
 }
 
-function Section({ title, actions, children }) {
+function Section({ title, actions, children, className = '' }) {
   return (
-    <section className="ps-section">
+    <section className={`ps-section${className ? ` ${className}` : ''}`}>
       <div className="ps-section__head">
         <h2>{title}</h2>
         <div className="ps-section__actions">{actions}</div>
@@ -281,6 +387,78 @@ const DOMAIN_FIELDS = [
   { id: 'cert', label: 'Cert', getValue: ({ item }) => (item.cert ? 'minted' : 'missing'), render: ({ item }) => (item.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>) },
   { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, aiValue: (item) => (item.dns === 'ok' ? 'resolving' : 'pending apply'), render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
   { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, aiValue: (item) => (item.upstream === 'up' ? 'upstream up' : 'upstream down'), render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
+  // Cert, DNS, and upstream can all read healthy while the browser still
+  // cannot open the address, because the system proxy claims the name first.
+  // Without this column that failure has no row to land on.
+  {
+    id: 'browser',
+    label: 'Browser',
+    getValue: ({ item }) => item.browser,
+    aiValue: (item) => (item.browser === 'shadowed'
+      ? 'unreachable in the browser: the system proxy claims this name because its suffix is not in the proxy bypass list'
+      : 'reachable directly'),
+    render: ({ item }) => (item.browser === 'shadowed'
+      ? <Chip tone="error">blocked</Chip>
+      : <Chip tone="success">direct</Chip>),
+  },
+];
+
+const DOCKER_FIELDS = [
+  {
+    id: 'service',
+    label: 'Service',
+    enableGlobalSearch: true,
+    getValue: ({ item }) => `${item.service} ${item.container} ${item.image}`,
+    aiValue: (item) => `${item.service} (container ${item.container}, image ${item.image})`,
+    render: ({ item }) => (
+      <span>
+        <strong>{item.service}</strong>
+        <span className="ps-cell-detail ps-mono">{item.project || 'standalone'} · {item.container}</span>
+      </span>
+    ),
+  },
+  {
+    id: 'published',
+    label: 'Published port',
+    getValue: ({ item }) => item.hostPort,
+    aiValue: (item) => `${item.hostIp || '*'}:${item.hostPort} → ${item.containerPort}/tcp${item.publicBind ? ' (all host interfaces)' : ''}`,
+    render: ({ item }) => (
+      <span className="ps-listeners">
+        <span className="ps-mono">{item.publicBind ? '*' : item.hostIp}:{item.hostPort} → {item.containerPort}/tcp</span>
+        {item.publicBind && <Chip tone="warning">all interfaces</Chip>}
+      </span>
+    ),
+  },
+  {
+    id: 'web',
+    label: 'Web probe',
+    getValue: ({ item }) => `${item.protocol} ${item.statusCode || ''}`.trim(),
+    aiValue: (item) => `${item.protocol.toUpperCase()} responded${item.statusCode ? ` with ${item.statusCode}` : ''}`,
+    render: ({ item }) => <Chip tone="success">{item.protocol.toUpperCase()} {item.statusCode || 'responding'}</Chip>,
+  },
+  {
+    id: 'state',
+    label: 'Container',
+    getValue: ({ item }) => item.health || item.state,
+    aiValue: (item) => item.health ? `${item.state}, health ${item.health}` : item.state,
+    render: ({ item }) => {
+      const state = item.health || item.state;
+      const tone = state === 'healthy' || state === 'running' ? 'success' : state === 'unhealthy' ? 'error' : 'warning';
+      return <Chip tone={tone}>{state}</Chip>;
+    },
+  },
+  {
+    id: 'ingress',
+    label: 'Ingress',
+    enableSorting: false,
+    getValue: ({ item }) => item.ingressDomains.map((domain) => domain.host).join(', '),
+    aiValue: (item) => item.ingressDomains.length ? item.ingressDomains.map((domain) => domain.host).join(', ') : 'not registered',
+    render: ({ item }) => (
+      item.ingressDomains.length
+        ? <span className="ps-listeners">{item.ingressDomains.map((domain) => <a key={domain.host} className="ps-mono" href={domain.url} target="_blank" rel="noreferrer">{domain.host}</a>)}</span>
+        : <Chip tone="warning">not registered</Chip>
+    ),
+  },
 ];
 
 const OBSERVED_FIELDS = [
@@ -423,6 +601,7 @@ const TLD_FIELDS = [
 // action and the section button so both frame the data the same way.
 const AI_WHAT = {
   domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD; a domain can be linked to the launchd agent that serves its upstream, which Dockmaster can start and stop)',
+  docker: 'the running Docker containers with published host TCP ports that responded to an HTTP or HTTPS probe, making them candidates for the local Caddy ingress',
   observed: 'the full list of local domain names this machine declares anywhere — /etc/hosts, dnsmasq rules, and /etc/resolver files — alongside what the system resolver and dnsmasq each answer, and which processes are listening on the address it resolves to',
   tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
@@ -433,6 +612,7 @@ const AI_WHAT = {
 
 const AI_ROW_QUESTION = {
   domains: 'What is this domain about — what is likely running on that upstream port, and does anything here look wrong (missing certificate, DNS not resolving yet, upstream down, or a linked service that should be started)?',
+  docker: 'What does this Docker service appear to be, is its published-port exposure appropriate, and should I register it with the local ingress?',
   observed: 'What is this entry about — what most likely created it, what would still depend on it, and would it be safe to remove? Flag it if the entry looks stale, or if the system resolver and dnsmasq disagree.',
   tlds: 'What is this suffix for, is its resolver file in place, and does anything look off — a vanity TLD with no sites, or a resolver file still pending a privileged apply?',
   ports: 'What is this process, and why would it be listening on this port? Tell me whether it is something a developer typically installs deliberately, what would break if I stopped it, and whether the port or bind address is a problem.',
@@ -481,9 +661,16 @@ async function machineSnapshot() {
 
 function Overview({ go }) {
   const { data, error, reload } = useApi('overview');
+  const [hero, setHero] = useState(0);
+  useEffect(() => {
+    if ( window.matchMedia('(prefers-reduced-motion: reduce)').matches ) return;
+    const timer = window.setInterval(() => setHero((value) => (value + 1) % OVERVIEW_HEROES.length), 7000);
+    return () => window.clearInterval(timer);
+  }, []);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const { counts, dns } = data;
+  const heroCopy = OVERVIEW_HEROES[hero];
   const cards = [
     { id: 'ports', label: 'Listening ports', value: counts.ports, sub: counts.sharedPorts ? `${counts.sharedPorts} shared between processes` : 'no shared ports' },
     { id: 'ingress', label: 'Local domains', value: counts.domains, sub: 'hosts, dnsmasq, resolver files' },
@@ -491,15 +678,35 @@ function Overview({ go }) {
     { id: 'dns', label: 'DNS layers', value: (dns.nextdns ? 1 : 0) + (dns.dnsmasq ? 1 : 0) + 1, sub: [dns.nextdns && 'NextDNS', dns.dnsmasq && 'dnsmasq', 'system'].filter(Boolean).join(' → ') },
   ];
   return (
-    <Section
-      title="Overview"
-      actions={
-        <>
-          <CopyForAI build={machineSnapshot} what="the whole machine (ports, domains, agents, DNS)" label="Copy machine for AI" />
-          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
-        </>
-      }
-    >
+    <div className="ps-overview">
+      <section className="ps-overview__hero">
+        <div>
+          <p className="ps-overview__kicker">{heroCopy.kicker}</p>
+          <h2>{heroCopy.title}</h2>
+          <p>{heroCopy.support}</p>
+        </div>
+        <Button __next40pxDefaultSize variant="primary" onClick={() => go('ingress')}>Trace a domain</Button>
+      </section>
+      <section className="ps-quick-start" aria-labelledby="ps-quick-start-title">
+        <div className="ps-section-heading">
+          <p className="ps-eyebrow">Quick Start</p>
+          <h2 id="ps-quick-start-title">What needs attention?</h2>
+        </div>
+        <div className="ps-journeys">
+          <button type="button" className="ps-journey is-primary" onClick={() => go('ingress')}><span className="ps-journey__number">01</span><span><strong>Connect a local address</strong><small>Discover the service, register its domain, and verify the route.</small></span><span className="ps-journey__path">Discover → register → verify</span><span className="ps-journey__arrow" aria-hidden="true">›</span></button>
+          <button type="button" className="ps-journey" onClick={() => go('ports')}><span className="ps-journey__number">02</span><span><strong>Investigate a port collision</strong><small>See every listener, ownership boundary, and shared binding before acting.</small></span><span className="ps-journey__path">Find → compare → contain</span><span className="ps-journey__arrow" aria-hidden="true">›</span></button>
+          <button type="button" className="ps-journey" onClick={() => go('services')}><span className="ps-journey__number">03</span><span><strong>Restore a local service</strong><small>Check state and logs, then use the narrow lifecycle action for that agent.</small></span><span className="ps-journey__path">Check → review → recover</span><span className="ps-journey__arrow" aria-hidden="true">›</span></button>
+        </div>
+      </section>
+      <Section
+        title="Machine snapshot"
+        actions={
+          <>
+            <CopyForAI build={machineSnapshot} what="the whole machine (ports, domains, agents, DNS)" label="Copy machine for AI" />
+            <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+          </>
+        }
+      >
       {dns.nextdns && (
         <PSNotice status="warning" isDismissible={false}>
           NextDNS is running — it sits above the scoped resolvers, so local domains can resolve differently in browsers than dnsmasq intends. Check Ingress &amp; Domains for divergence flags.
@@ -514,17 +721,43 @@ function Overview({ go }) {
           </button>
         ))}
       </div>
+      </Section>
+    </div>
+  );
+}
+
+function HelpPage() {
+  return (
+    <Section title="Help & Feedback">
+      <p>Start on Overview, choose the task that matches the symptom, then follow the linked inspection pages. Dockmaster keeps observation separate from user-owned and privileged changes. Repository setup, recovery, and operating notes live in README.md.</p>
+      <p className="ps-hint">This loopback app has no public feedback service. Record product feedback in the repository you used to start Dockmaster.</p>
+    </Section>
+  );
+}
+
+function SettingsPage({ themePref, onThemeChange }) {
+  return (
+    <Section title="App settings">
+      <div className="ps-settings-group">
+        <ConversationalField
+          label="How should Dockmaster look?"
+          description="Follow your Mac automatically, or keep this local dashboard light or dark. This changes Dockmaster only."
+        >
+          <ThemeSwitch pref={themePref} onChange={onThemeChange} />
+        </ConversationalField>
+      </div>
     </Section>
   );
 }
 
 // The management half (absorbed from Local Ingress): the registry drives
 // user-owned Caddy site blocks + mkcert certs; the root daemon's
-// caddy --watch applies changes live, so add/edit/remove needs no sudo —
-// only new DNS/hosts lines stage for one privileged apply. The observed-
-// domains diagnostics live here too: one screen views AND manages domains.
+// caddy --watch applies changes live. DNS/hosts lines and privileged-file
+// edits enter fixed queues consumed by the validated root auto-apply job.
+// The observed-domains diagnostics live here too.
 function Ingress() {
   const { data, error, reload } = useApi('ingress');
+  const docker = useApi('docker/services');
   const observed = useApi('domains');
   const staged = useApi('observed/edits');
   const tlds = useApi('tlds');
@@ -534,12 +767,23 @@ function Ingress() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState(null);
   const [confirmHost, setConfirmHost] = useState(null);
-  const [edit, setEdit] = useState(null); // { host, port }
+  const [edit, setEdit] = useState(null); // { originalHost, name, tld, port }
   const [svcEdit, setSvcEdit] = useState(null); // { host, service }
   const [ipEdit, setIpEdit] = useState(null); // { kind, name, key?, ip }
   const [resEdit, setResEdit] = useState(null); // { file, content, busy }
+  const [proxyBusy, setProxyBusy] = useState(false);
+  const domainNameInput = useRef(null);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
+  const refreshAll = () => { reload(); docker.reload(); observed.reload(); staged.reload(); tlds.reload(); };
+  const refreshAfterApply = () => {
+    refreshAll();
+    if (data.autoApply) {
+      setTimeout(refreshAll, 900);
+      setTimeout(refreshAll, 2600);
+      setTimeout(refreshAll, 5000);
+    }
+  };
   const add = async () => {
     setBusy(true);
     setNotice(null);
@@ -549,10 +793,15 @@ function Ingress() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, tld, port: Number(port) }),
       }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
-      setNotice({ status: 'success', text: `${r.host} registered — live as soon as any staged DNS applies.` });
+      setNotice({
+        status: 'success',
+        text: data.autoApply
+          ? `${r.host} registered. DNS and hosts are applying automatically.`
+          : `${r.host} registered. Apply the staged DNS and hosts lines to finish.`,
+      });
       setName('');
       setPort('');
-      reload();
+      refreshAfterApply();
     } catch (e) {
       setNotice({ status: 'error', text: e.message });
     } finally {
@@ -562,19 +811,26 @@ function Ingress() {
   const remove = async (host) => {
     setConfirmHost(null);
     await fetch(`/api/ingress/domains/${encodeURIComponent(host)}`, { method: 'DELETE' });
-    reload();
+    refreshAfterApply();
   };
-  const savePort = async () => {
+  const saveDomain = async () => {
     setBusy(true);
     try {
-      const r = await fetch(`/api/ingress/domains/${encodeURIComponent(edit.host)}`, {
+      const r = await fetch(`/api/ingress/domains/${encodeURIComponent(edit.originalHost)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ port: Number(edit.port) }),
+        body: JSON.stringify({ host: `${edit.name}.${edit.tld}`, port: Number(edit.port) }),
       }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
-      setNotice({ status: 'success', text: `${r.host} now proxies 127.0.0.1:${r.port} — live immediately.` });
+      setNotice({
+        status: 'success',
+        text: (r.previousHost || edit.originalHost) === r.host
+          ? `${r.host} now proxies 127.0.0.1:${r.port}.`
+          : data.autoApply
+            ? `${r.previousHost || edit.originalHost} renamed to ${r.host}. DNS cleanup is applying automatically.`
+            : `${r.previousHost || edit.originalHost} renamed to ${r.host}. Apply the staged DNS changes to finish.`,
+      });
       setEdit(null);
-      reload();
+      refreshAfterApply();
     } catch (e) {
       setNotice({ status: 'error', text: e.message });
     } finally {
@@ -608,22 +864,51 @@ function Ingress() {
       : { status: 'error', text: r.error || 'Failed.' });
     setTimeout(reload, 900);
   };
-  const refreshAll = () => { reload(); observed.reload(); staged.reload(); tlds.reload(); };
-  // Observed-domain management: the underlying files are root-owned, so an
-  // edit is STAGED (user-owned queue) and applied by one sudo run — the
-  // ingress doctrine, extended to hosts/dnsmasq/resolver.
+  // Observed-domain management: the server writes intent to a user-owned
+  // queue. The root helper validates it again before touching privileged files.
   const stage = async (body) => {
     const r = await fetch('/api/observed/edits', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     }).then((x) => x.json());
-    if (r.error) setNotice({ status: 'error', text: r.error });
-    staged.reload();
+    if (r.error) {
+      setNotice({ status: 'error', text: r.error });
+    } else if (data.autoApply) {
+      setNotice({ status: 'success', text: 'Edit queued for automatic apply.' });
+    }
+    refreshAfterApply();
   };
   const unstage = async (id) => {
     await fetch(`/api/observed/edits/${id}`, { method: 'DELETE' });
     staged.reload();
+  };
+  // Proxy bypass: exempt every registered suffix on every network service.
+  // Unlike the hosts/dnsmasq/resolver edits this usually needs no password —
+  // networksetup accepts proxy writes from an admin account — so the button
+  // does the work rather than printing a command. A service that refuses
+  // falls back to the same validated queue the other privileged edits use.
+  const fixBypass = async () => {
+    setProxyBusy(true);
+    setNotice(null);
+    try {
+      const r = await fetch('/api/proxy/bypass', { method: 'POST' }).then((x) => x.json());
+      const applied = (r.applied || []).map((item) => item.service);
+      if (r.ok && applied.length) {
+        setNotice({ status: 'success', text: `Proxy bypass updated on ${applied.join(' and ')}. ${r.hint || ''}`.trim() });
+      } else if (r.ok) {
+        setNotice({ status: 'info', text: 'Every registered suffix was already exempt from the proxy.' });
+      } else if ((r.staged || []).length) {
+        setNotice({ status: 'warning', text: `${r.staged.join(' and ')} refused a direct change, so it is queued for the privileged worker instead.` });
+      } else {
+        setNotice({ status: 'error', text: (r.errors || []).join(' ') || 'The proxy bypass did not change.' });
+      }
+      refreshAfterApply();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setProxyBusy(false);
+    }
   };
   const openResolver = async (file) => {
     const r = await fetch(`/api/observed/resolver/${encodeURIComponent(file)}`).then((x) => x.json());
@@ -644,8 +929,29 @@ function Ingress() {
     'dnsmasq-del': `dnsmasq: remove /${e.key}/`,
     'resolver-write': `resolver: rewrite /etc/resolver/${e.file}`,
     'resolver-del': `resolver: remove /etc/resolver/${e.file}`,
+    'proxy-bypass-set': `proxy: ${e.service} bypass → ${(e.domains || []).join(', ')}`,
   })[e.kind] || e.kind;
   const managedHosts = new Set(data.domains.map((d) => d.host));
+  const dockerRows = (docker.data?.services || []).map((service) => ({
+    ...service,
+    ingressDomains: data.domains.filter((domain) => Number(domain.port) === service.hostPort),
+  }));
+  const prefillDockerDomain = (service) => {
+    let candidate = service.suggestedName;
+    let suffix = 2;
+    while (managedHosts.has(`${candidate}.${tld}`)) {
+      candidate = `${service.suggestedName}-${suffix}`;
+      suffix += 1;
+    }
+    setName(candidate);
+    setPort(String(service.hostPort));
+    setNotice({ status: 'info', text: `${service.service} is ready to register. Confirm the domain name and suffix, then add it.` });
+    requestAnimationFrame(() => {
+      domainNameInput.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      domainNameInput.current?.focus();
+      domainNameInput.current?.select();
+    });
+  };
   const editableHost = (item) => item.inHosts && !managedHosts.has(item.name) && !item.name.startsWith('*');
   // The screen's own flags column says more than the shared definition can:
   // it also knows which rows have an edit queued and which the registry owns.
@@ -666,8 +972,17 @@ function Ingress() {
       </>
     ),
   }));
+  const proxy = data.proxy;
+  const shadowed = data.domains.filter((d) => d.browser === 'shadowed');
   const ingressState = [
     `Ingress daemon: ${data.ingress.up ? 'up' : 'DOWN'}, serving on ${data.ingress.aliasIp} + ${data.ingress.aliasIp6}`,
+    proxy.on
+      ? `System proxy: ON${proxy.server ? ` (SOCKS ${proxy.server})` : ''}${proxy.pac ? ' via an auto-config file' : ''}. Exempt suffixes: ${proxy.suffixes.filter((x) => x.covered).map((x) => x.entry).join(', ') || 'none'}. Suffixes the proxy still claims: ${proxy.gaps.join(', ') || 'none'}.`
+      : 'System proxy: off, so every local address is reached directly.',
+    shadowed.length
+      ? `Registered domains unreachable in the browser because the proxy claims the name: ${shadowed.map((d) => d.host).join(', ')}`
+      : 'Registered domains unreachable in the browser: none',
+    `Privileged queue auto-apply: ${data.autoApply ? 'enabled' : 'not installed'}`,
     `Staged DNS/hosts lines waiting for a privileged apply: ${data.dnsPending.length}`,
     stagedEdits.length ? `Staged edits to privileged files: ${stagedEdits.map(describeEdit).join('; ')}` : 'Staged edits to privileged files: none',
   ].join('\n');
@@ -676,18 +991,26 @@ function Ingress() {
     body: `${ingressState}\n\n${aiTable(DOMAIN_FIELDS, data.domains)}`,
     question: AI_SECTION_QUESTION,
   });
+  const dockerBlock = () => aiPrompt({
+    subject: `Below, from Dockmaster: ${AI_WHAT.docker}.`,
+    body: aiTable(DOCKER_FIELDS, dockerRows),
+    question: AI_SECTION_QUESTION,
+  });
   const observedBlock = () => aiPrompt({
     subject: `Below, from Dockmaster: ${AI_WHAT.observed}.`,
     body: `${ingressState}\n\n${aiTable(observedFields, observed.data || [])}`,
     question: AI_SECTION_QUESTION,
   });
   const wholeScreen = () => aiPrompt({
-    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster — the domains I registered with my local ingress (each under .test or a vanity TLD), followed by every local domain name this machine declares anywhere.',
+    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster: Docker web services discovered from published ports, domains registered with my local ingress, and every local domain name this machine declares.',
     body: [
       ingressState,
       '',
       `## Registered ingress domains (${data.domains.length})`,
       aiTable(DOMAIN_FIELDS, data.domains),
+      '',
+      `## Detected Docker web services (${dockerRows.length})`,
+      aiTable(DOCKER_FIELDS, dockerRows),
       '',
       `## All observed local domains (${(observed.data || []).length})`,
       aiTable(observedFields, observed.data || []),
@@ -708,53 +1031,163 @@ function Ingress() {
         <Chip tone={data.ingress.up ? 'success' : 'error'}>
           {data.ingress.up ? 'ingress daemon up' : 'ingress daemon down'}
         </Chip>
+        <Chip tone={data.autoApply ? 'success' : 'warning'}>
+          {data.autoApply ? 'auto-apply on' : 'auto-apply off'}
+        </Chip>
         <Chip>{data.ingress.aliasIp} + {data.ingress.aliasIp6}</Chip>
+        {proxy.on && (
+          <Chip tone={proxy.gaps.length ? 'error' : 'success'}>
+            {proxy.gaps.length ? `proxy shadows ${proxy.gaps.length} suffix${proxy.gaps.length > 1 ? 'es' : ''}` : 'proxy bypassed for local suffixes'}
+          </Chip>
+        )}
       </div>
       {!data.ingress.up && (
         <PSNotice
           status="error"
           isDismissible={false}
-          spokenMessage="The root ingress daemon isn’t serving — one privileged install brings it up."
+          spokenMessage="The root ingress daemon is not serving. One privileged install brings up ingress and auto-apply."
         >
-          <SudoSteps intro="The root ingress daemon isn’t serving — one privileged install brings it up." command={data.installCommand} />
+          <SudoSteps intro="One privileged install brings up ingress and the automatic DNS queue worker." command={data.installCommand} />
+        </PSNotice>
+      )}
+      {data.ingress.up && !data.autoApply && (
+        <PSNotice
+          status="warning"
+          isDismissible={false}
+          spokenMessage="Automatic privileged changes are not installed. One privileged install enables them."
+        >
+          <SudoSteps intro="One privileged install enables validated automatic DNS, hosts, and resolver updates. No password or Keychain environment variable is stored." command={data.installCommand} />
         </PSNotice>
       )}
       {data.dnsPending.length > 0 && (
         <PSNotice
           status="warning"
           isDismissible={false}
-          spokenMessage={`${data.dnsPending.length} staged DNS or hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`}
+          spokenMessage={data.autoApply
+            ? `${data.dnsPending.length} DNS or hosts line${data.dnsPending.length > 1 ? 's are' : ' is'} queued for automatic apply.`
+            : `${data.dnsPending.length} staged DNS or hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`}
         >
-          <SudoSteps intro={`${data.dnsPending.length} staged DNS/hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`} command={data.applyDnsCommand} />
+          {data.autoApply
+            ? `${data.dnsPending.length} DNS/hosts line${data.dnsPending.length > 1 ? 's are' : ' is'} queued. The root worker applies them automatically.`
+            : <SudoSteps intro={`${data.dnsPending.length} staged DNS/hosts line${data.dnsPending.length > 1 ? 's' : ''} need one privileged apply.`} command={data.applyDnsCommand} />}
+        </PSNotice>
+      )}
+      {shadowed.length > 0 && (
+        <PSNotice
+          status="error"
+          isDismissible={false}
+          spokenMessage={`${shadowed.length} registered domain${shadowed.length > 1 ? 's are' : ' is'} served correctly but unreachable in the browser, because the system proxy claims the name.`}
+        >
+          <p className="ps-sudosteps__intro">
+            {shadowed.length === 1 ? `${shadowed[0].host} is` : `${shadowed.length} registered domains are`}{' '}
+            served correctly here but will not open in a browser. The system proxy is on, and{' '}
+            {proxy.gaps.join(', ')} {proxy.gaps.length > 1 ? 'are' : 'is'} not exempt from it, so the browser hands the
+            name to the proxy instead of resolving it on this machine. Chrome reports that as
+            {' '}<code>ERR_SOCKS_CONNECTION_FAILED</code>.
+          </p>
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="primary" isBusy={proxyBusy} onClick={fixBypass}>
+              Exempt these suffixes from the proxy
+            </Button>
+          </div>
         </PSNotice>
       )}
       {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
-      <div className="ps-addrow">
-        <div className="ps-suffixfield">
+      <div className="ps-conversation-form">
+        <ConversationalField
+          label="What local address should open this service?"
+          description="Use a short name. Dockmaster adds the selected local suffix and creates the HTTPS route."
+        >
+          <div className="ps-suffixfield">
           <input
+            ref={domainNameInput}
+            id="ingress-domain-name"
+            aria-label="Domain name"
             placeholder="myapp"
             value={name}
             onChange={(e) => setName(e.target.value.toLowerCase().replace(new RegExp(`\\.${tld}$`), ''))}
             onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
           />
-          <select className="ps-suffix-select" value={tld} aria-label="TLD" onChange={(e) => setTld(e.target.value)}>
-            {(tlds.data?.tlds?.map((t) => t.tld) || ['test']).map((t) => (
-              <option key={t} value={t}>.{t}</option>
-            ))}
-          </select>
+            <span>.{tld}</span>
+          </div>
+        </ConversationalField>
+        <details className="ps-field-options">
+          <summary>Use another suffix</summary>
+          <ConversationalField
+            label="Which local suffix should this address use?"
+            description="Keep .test unless this service needs one of your registered vanity suffixes."
+          >
+            <PopoverSelect
+              className="ps-suffix-select"
+              label="Local suffix"
+              hideLabelFromVision
+              value={tld}
+              options={(tlds.data?.tlds?.map((item) => item.tld) || ['test']).map((item) => ({
+                value: item,
+                label: `.${item}`,
+              }))}
+              onChange={setTld}
+              size="compact"
+            />
+          </ConversationalField>
+        </details>
+        <ConversationalField
+          label="Which port is the service listening on?"
+          description="Dockmaster sends requests for this address to the service on 127.0.0.1 at this port."
+        >
+          <input
+            className="ps-search ps-portinput"
+            aria-label="Upstream port"
+            placeholder="3000"
+            inputMode="numeric"
+            value={port}
+            onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
+            onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
+          />
+        </ConversationalField>
+        <div className="ps-field-actions">
+          <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!name || !port} onClick={add}>
+            Add domain
+          </Button>
         </div>
-        <input
-          className="ps-search ps-portinput"
-          placeholder="port"
-          inputMode="numeric"
-          value={port}
-          onChange={(e) => setPort(e.target.value.replace(/\D/g, ''))}
-          onKeyDown={(e) => { if (e.key === 'Enter' && name && port) add(); }}
-        />
-        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!name || !port} onClick={add}>
-          Add domain
-        </Button>
       </div>
+      <div className="ps-subhead-row">
+        <h3 className="ps-subhead ps-subhead--flush">Detected Docker web services</h3>
+        <div className="ps-subhead-actions">
+          {docker.data?.available && <Chip tone="success">{dockerRows.length} detected</Chip>}
+          {docker.data?.available && <CopyForAI build={dockerBlock} what="the detected Docker web services" />}
+        </div>
+      </div>
+      {docker.error && <PSNotice status="error" isDismissible={false}>{docker.error}</PSNotice>}
+      {!docker.data && !docker.error && <Spinner />}
+      {docker.data && !docker.data.available && (
+        <PSNotice status="warning" isDismissible={false}>{docker.data.error}</PSNotice>
+      )}
+      {docker.data?.available && dockerRows.length === 0 && (
+        <Text className="ps-hint">Docker is available, but no published TCP port responded as HTTP or HTTPS.</Text>
+      )}
+      {docker.data?.available && dockerRows.length > 0 && (
+        <PSDataView
+          data={dockerRows}
+          fields={DOCKER_FIELDS}
+          actions={[
+            {
+              id: 'register-domain',
+              label: 'Register domain…',
+              isEligible: (item) => item.ingressDomains.length === 0,
+              callback: ([item]) => prefillDockerDomain(item),
+            },
+          ]}
+          itemKey="id"
+          aiWhat={AI_WHAT.docker}
+          aiQuestion={AI_ROW_QUESTION.docker}
+        />
+      )}
+      {docker.data?.available && (
+        <Text className="ps-hint">
+          Dockmaster asks Docker for running containers, then probes published TCP ports. Database ports and internal-only containers stay out of this list. “All interfaces” means the service is exposed beyond localhost even before ingress.
+        </Text>
+      )}
       <div className="ps-subhead-row">
         <h3 className="ps-subhead ps-subhead--flush">Registered domains</h3>
         <CopyForAI build={registeredBlock} what="the registered domains" />
@@ -763,7 +1196,19 @@ function Ingress() {
         data={data.domains}
         fields={DOMAIN_FIELDS}
         actions={[
-          { id: 'edit', label: 'Change port', callback: ([item]) => setEdit({ host: item.host, port: String(item.port) }) },
+          {
+            id: 'edit',
+            label: 'Edit domain',
+            callback: ([item]) => {
+              const splitAt = item.host.lastIndexOf('.');
+              setEdit({
+                originalHost: item.host,
+                name: item.host.slice(0, splitAt),
+                tld: item.host.slice(splitAt + 1),
+                port: String(item.port),
+              });
+            },
+          },
           { id: 'service-link', label: 'Link service…', callback: ([item]) => setSvcEdit({ host: item.host, service: item.service || '' }) },
           { id: 'service-start', label: 'Start service', isEligible: (item) => !!item.service && !item.serviceState?.missing && !item.serviceState?.disabled && !item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'start') },
           { id: 'service-stop', label: 'Stop service', isDestructive: true, isEligible: (item) => !!item.service && !!item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'stop') },
@@ -774,43 +1219,87 @@ function Ingress() {
         aiQuestion={AI_ROW_QUESTION.domains}
       />
       {edit && (
-        <div className="ps-addrow">
-          <div className="ps-suffixfield">
-            <input value={edit.host} disabled />
-            <span>→ 127.0.0.1:</span>
+        <div className="ps-conversation-form">
+          <ConversationalField
+            label="What should this local address be?"
+            description="Changing the name replaces the current HTTPS route and cleans up its old local resolution entry."
+          >
+            <div className="ps-suffixfield">
+            <input
+              aria-label="Domain name"
+              autoFocus
+              value={edit.name}
+              onChange={(e) => setEdit({ ...edit, name: e.target.value.toLowerCase().replace(new RegExp(`\\.${edit.tld}$`), '') })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && edit.name && edit.port) saveDomain(); if (e.key === 'Escape') setEdit(null); }}
+            />
+              <span>.{edit.tld}</span>
+            </div>
+          </ConversationalField>
+          <details className="ps-field-options">
+            <summary>Use another suffix</summary>
+            <ConversationalField
+              label="Which local suffix should this address use?"
+              description="Changing the suffix moves the address to another registered local namespace."
+            >
+              <PopoverSelect
+                className="ps-suffix-select"
+                value={edit.tld}
+                label="Local suffix"
+                hideLabelFromVision
+                options={[...new Set([...(tlds.data?.tlds?.map((item) => item.tld) || ['test']), edit.tld])].map((item) => ({
+                  value: item,
+                  label: `.${item}`,
+                }))}
+                onChange={(value) => setEdit({ ...edit, tld: value })}
+                size="compact"
+              />
+            </ConversationalField>
+          </details>
+          <ConversationalField
+            label="Which port should receive requests?"
+            description="Use the port where the local service is already listening."
+          >
+            <input
+              className="ps-search ps-portinput"
+              aria-label="Upstream port"
+              placeholder="3000"
+              inputMode="numeric"
+              value={edit.port}
+              onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/\D/g, '') })}
+              onKeyDown={(e) => { if (e.key === 'Enter' && edit.name && edit.port) saveDomain(); if (e.key === 'Escape') setEdit(null); }}
+            />
+          </ConversationalField>
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!edit.name || !edit.port} onClick={saveDomain}>Save domain</Button>
+            <Button __next40pxDefaultSize variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
           </div>
-          <input
-            className="ps-search ps-portinput"
-            autoFocus
-            inputMode="numeric"
-            value={edit.port}
-            onChange={(e) => setEdit({ ...edit, port: e.target.value.replace(/\D/g, '') })}
-            onKeyDown={(e) => { if (e.key === 'Enter' && edit.port) savePort(); if (e.key === 'Escape') setEdit(null); }}
-          />
-          <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!edit.port} onClick={savePort}>Save port</Button>
-          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setEdit(null)}>Cancel</Button>
         </div>
       )}
       {svcEdit && (
-        <div className="ps-addrow">
-          <div className="ps-suffixfield">
-            <input value={svcEdit.host} disabled />
-            <span>backed by</span>
-          </div>
-          <select
-            className="ps-suffix-select"
-            autoFocus
-            aria-label="Launchd agent"
-            value={svcEdit.service}
-            onChange={(e) => setSvcEdit({ ...svcEdit, service: e.target.value })}
+        <div className="ps-conversation-form">
+          <p className="ps-field-context"><strong>{svcEdit.host}</strong> is the address being linked.</p>
+          <ConversationalField
+            label="Which launchd service starts this site?"
+            description="Dockmaster uses this link to show service health and offer the correct start or stop action beside the domain."
           >
-            <option value="">— no service —</option>
-            {[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])].sort().map((l) => (
-              <option key={l} value={l}>{l}</option>
-            ))}
-          </select>
-          <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
-          <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
+            <PopoverSelect
+              className="ps-suffix-select"
+              label="Launchd service"
+              hideLabelFromVision
+              value={svcEdit.service}
+              options={[
+                { value: '', label: 'No linked service' },
+                ...[...new Set([...(data.agents || []), ...(svcEdit.service ? [svcEdit.service] : [])])]
+                  .sort()
+                  .map((item) => ({ value: item, label: item })),
+              ]}
+              onChange={(value) => setSvcEdit({ ...svcEdit, service: value })}
+            />
+          </ConversationalField>
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
+            <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
+          </div>
         </div>
       )}
       {confirmHost && (
@@ -819,7 +1308,53 @@ function Ingress() {
           <Button size="small" variant="primary" isDestructive onClick={() => remove(confirmHost)}>Remove it</Button>
         </PSNotice>
       )}
-      <Text className="ps-hint">Registered domains apply live (the root daemon watches the user-owned config) — only brand-new DNS/hosts lines wait for the one sudo apply above. Link a domain to one of your launchd agents and its upstream can be started and stopped right from this table.</Text>
+      <Text className="ps-hint">Domain and port changes apply live because the root daemon watches the user-owned config. With auto-apply on, new resolution lines and old-name cleanup follow automatically. Link a domain to one of your launchd agents and its upstream can be started and stopped right from this table.</Text>
+
+      <div className="ps-subhead-row">
+        <h3 className="ps-subhead ps-subhead--flush">Browser reach</h3>
+        <div className="ps-subhead-actions">
+          <Chip tone={!proxy.on ? 'success' : proxy.gaps.length ? 'error' : 'success'}>
+            {!proxy.on ? 'no system proxy' : proxy.gaps.length ? `${proxy.gaps.length} suffix${proxy.gaps.length > 1 ? 'es' : ''} claimed` : 'all suffixes exempt'}
+          </Chip>
+        </div>
+      </div>
+      <div className="ps-proxyreach">
+        <div className="ps-dnsrow">
+          {proxy.on ? (
+            <>
+              {proxy.socks && <Chip tone="warning">SOCKS {proxy.server}</Chip>}
+              {proxy.http && <Chip tone="warning">HTTP proxy</Chip>}
+              {proxy.https && <Chip tone="warning">HTTPS proxy</Chip>}
+              {proxy.pac && <Chip tone="warning">auto-config file</Chip>}
+            </>
+          ) : <Chip tone="success">proxy off</Chip>}
+        </div>
+        <ul className="ps-suffixlist">
+          {proxy.suffixes.map((item) => (
+            <li key={item.tld}>
+              <span className="ps-mono">{item.entry}</span>
+              {item.covered
+                ? <Chip tone="success">exempt</Chip>
+                : proxy.on ? <Chip tone="error">claimed by the proxy</Chip> : <Chip>not exempt</Chip>}
+            </li>
+          ))}
+        </ul>
+        {proxy.gaps.length > 0 && (
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="primary" isBusy={proxyBusy} onClick={fixBypass}>
+              Exempt these suffixes from the proxy
+            </Button>
+          </div>
+        )}
+        <Text className="ps-hint">
+          A system proxy resolves hostnames on its own side, where a name that exists only on this machine cannot
+          exist, so it answers before the hosts file or any resolver is consulted. The bypass list is the exemption and
+          it works by suffix, so one entry per registered TLD covers every site under it, including ones added later.
+          {proxy.pac && ' An auto-config file is also in play; it can route a name even when the bypass list exempts it.'}
+          {' '}Dockmaster only adds entries here. Nothing another tool put in the list is removed, and a suffix’s entry
+          is retired only when you deregister that TLD.
+        </Text>
+      </div>
 
       <div className="ps-subhead-row">
         <h3 className="ps-subhead ps-subhead--flush">All observed local domains</h3>
@@ -829,14 +1364,18 @@ function Ingress() {
         <PSNotice
           status="warning"
           isDismissible={false}
-          spokenMessage={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files — apply once with sudo.`}
+          spokenMessage={data.autoApply
+            ? `${stagedEdits.length} privileged-file edit${stagedEdits.length > 1 ? 's are' : ' is'} queued for automatic apply.`
+            : `${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files. Apply once with sudo.`}
         >
-          <SudoSteps intro={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files (hosts / dnsmasq / resolver) — apply once with sudo.`} command={staged.data.applyCommand} />
+          {data.autoApply
+            ? `${stagedEdits.length} validated edit${stagedEdits.length > 1 ? 's are' : ' is'} queued for the root worker.`
+            : <SudoSteps intro={`${stagedEdits.length} staged edit${stagedEdits.length > 1 ? 's' : ''} to privileged files (hosts / dnsmasq / resolver). Apply once with sudo.`} command={staged.data.applyCommand} />}
           <ul className="ps-editlist">
             {stagedEdits.map((e) => (
               <li key={e.id}>
                 <code>{describeEdit(e)}</code>
-                <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>
+                {!data.autoApply && <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>}
               </li>
             ))}
           </ul>
@@ -862,31 +1401,36 @@ function Ingress() {
             aiQuestion={AI_ROW_QUESTION.observed}
           />
           {ipEdit && (
-            <div className="ps-addrow">
-              <div className="ps-suffixfield">
-                <input value={ipEdit.kind === 'dnsmasq-set' ? `address=/${ipEdit.key}/` : ipEdit.name} disabled />
-                <span>{ipEdit.kind === 'dnsmasq-set' ? '' : '→'}</span>
-              </div>
-              <input
-                className="ps-search"
-                autoFocus
-                placeholder="IP address"
-                value={ipEdit.ip}
-                onChange={(e) => setIpEdit({ ...ipEdit, ip: e.target.value.trim() })}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && ipEdit.ip) { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }
-                  if (e.key === 'Escape') setIpEdit(null);
-                }}
-              />
-              <Button
-                __next40pxDefaultSize
-                variant="primary"
-                disabled={!ipEdit.ip}
-                onClick={() => { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }}
+            <div className="ps-conversation-form">
+              <p className="ps-field-context"><strong>{ipEdit.kind === 'dnsmasq-set' ? ipEdit.key : ipEdit.name}</strong> is the local name being changed.</p>
+              <ConversationalField
+                label="What IP address should this name resolve to?"
+                description="Requests for this name will be sent to this address after the validated hosts or dnsmasq edit is applied."
               >
-                Stage edit
-              </Button>
-              <Button __next40pxDefaultSize variant="tertiary" onClick={() => setIpEdit(null)}>Cancel</Button>
+                <input
+                  className="ps-search"
+                  aria-label="IP address"
+                  autoFocus
+                  placeholder="127.0.0.1"
+                  value={ipEdit.ip}
+                  onChange={(e) => setIpEdit({ ...ipEdit, ip: e.target.value.trim() })}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && ipEdit.ip) { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }
+                    if (e.key === 'Escape') setIpEdit(null);
+                  }}
+                />
+              </ConversationalField>
+              <div className="ps-field-actions">
+                <Button
+                  __next40pxDefaultSize
+                  variant="primary"
+                  disabled={!ipEdit.ip}
+                  onClick={() => { stage(ipEdit.kind === 'dnsmasq-set' ? { kind: ipEdit.kind, key: ipEdit.key, ip: ipEdit.ip } : { kind: ipEdit.kind, name: ipEdit.name, ip: ipEdit.ip }); setIpEdit(null); }}
+                >
+                  {data.autoApply ? 'Apply edit' : 'Stage edit'}
+                </Button>
+                <Button __next40pxDefaultSize variant="tertiary" onClick={() => setIpEdit(null)}>Cancel</Button>
+              </div>
             </div>
           )}
           {resEdit && (
@@ -894,19 +1438,91 @@ function Ingress() {
               <div className="ps-log__head">
                 <span className="ps-mono">/etc/resolver/{resEdit.file}</span>
                 <span>
-                  <Button size="small" variant="primary" disabled={!resEdit.content.trim()} onClick={() => { stage({ kind: 'resolver-write', file: resEdit.file, content: resEdit.content }); setResEdit(null); }}>Stage edit</Button>
+                  <Button size="small" variant="primary" disabled={!resEdit.content.trim()} onClick={() => { stage({ kind: 'resolver-write', file: resEdit.file, content: resEdit.content }); setResEdit(null); }}>{data.autoApply ? 'Apply edit' : 'Stage edit'}</Button>
                   <Button size="small" variant="tertiary" onClick={() => setResEdit(null)}>Close</Button>
                 </span>
               </div>
-              <textarea
-                className="ps-editor__area ps-editor__area--short"
-                spellCheck={false}
-                value={resEdit.content}
-                onChange={(e) => setResEdit({ ...resEdit, content: e.target.value })}
-              />
+              <ConversationalField
+                className="ps-expert-field"
+                label="Resolver file contents"
+                description="This expert setting routes the whole suffix to a nameserver. The save action validates and queues the root-owned file change before it is applied."
+              >
+                <textarea
+                  className="ps-editor__area ps-editor__area--short"
+                  aria-label="Resolver file contents"
+                  spellCheck={false}
+                  value={resEdit.content}
+                  onChange={(e) => setResEdit({ ...resEdit, content: e.target.value })}
+                />
+              </ConversationalField>
             </div>
           )}
-          <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files) — including domains other tools own. These files are root-owned, so edits stage into a queue and apply with the one sudo command above (backups are written; dnsmasq restarts and caches flush automatically). "Divergent" = the system resolver and dnsmasq disagree. Rows marked <em>managed</em> belong to the registry at the top — edit them there.</Text>
+          <Text className="ps-hint">Everything the machine declares (hosts file, dnsmasq, resolver files), including domains other tools own. Root-owned files are changed through a validated queue; auto-apply writes backups, restarts dnsmasq, and flushes caches. "Divergent" means the system resolver and dnsmasq disagree. Rows marked <em>managed</em> belong to the registry at the top; edit them there.</Text>
+        </>
+      )}
+    </Section>
+  );
+}
+
+function Activity() {
+  const { data, error, reload } = useApi('activity');
+  const ready = data?.retentionDays === 30 && data?.workerVersion === 2;
+  const sectionPrompt = () => aiPrompt({
+    subject: 'Below is Dockmaster’s auto-apply activity log. It records validated DNS, hosts, and resolver queue processing by the root worker.',
+    body: [
+      `Worker version: ${data?.workerVersion || 'not installed'}`,
+      `Retention: ${data?.retentionDays ? `${data.retentionDays} days` : 'not configured'}`,
+      `Interrupted queue claims: ${data?.orphanedClaims || 0}`,
+      `Log: ${data?.logPath || 'unavailable'}`,
+      '',
+      ...(data?.lines || ['No activity recorded yet.']),
+    ].join('\n'),
+    question: 'Explain what changed, call out failures, rejected edits, interrupted runs, or suspicious gaps, and tell me whether the worker looks healthy now.',
+  });
+  return (
+    <Section
+      title="Activity"
+      className="ps-section--activity"
+      actions={
+        <>
+          {data && <CopyForAI build={sectionPrompt} what="the activity log" />}
+          <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
+        </>
+      }
+    >
+      {error && <PSNotice status="error" isDismissible={false}>{error}</PSNotice>}
+      {!data && !error && <Spinner />}
+      {data && (
+        <>
+          <div className="ps-dnsrow">
+            <Chip tone={data.workerVersion === 2 ? 'success' : 'warning'}>
+              {data.workerVersion ? `auto-apply worker v${data.workerVersion}` : 'worker not installed'}
+            </Chip>
+            <Chip tone={ready ? 'success' : 'warning'}>
+              {data.retentionDays ? `${data.retentionDays}-day retention` : 'retention not configured'}
+            </Chip>
+            {data.orphanedClaims > 0 && <Chip tone="warning">{data.orphanedClaims} interrupted claim{data.orphanedClaims > 1 ? 's' : ''}</Chip>}
+          </div>
+          {!ready && (
+            <PSNotice
+              status="warning"
+              isDismissible={false}
+              spokenMessage="The stable auto-apply worker and 30-day activity retention need the installer upgrade."
+            >
+              <SudoSteps
+                intro={`Re-run the one-time installer to replace the worker, enable 30-day activity retention${data.orphanedClaims ? `, and recover ${data.orphanedClaims} interrupted queue claim${data.orphanedClaims > 1 ? 's' : ''}` : ''}.`}
+                command={data.installCommand}
+              />
+            </PSNotice>
+          )}
+          <div className="ps-log">
+            <div className="ps-log__head">
+              <span>Auto-apply activity</span>
+              <span className="ps-mono">{data.logPath}</span>
+            </div>
+            <pre>{data.lines.join('\n') || 'No activity recorded yet.'}</pre>
+          </div>
+          <Text className="ps-hint">The root worker records queued changes, validation results, failures, and successful applies here. An idle heartbeat appears daily, and macOS rotates the log with 30-day retention.</Text>
         </>
       )}
     </Section>
@@ -928,6 +1544,14 @@ function Tlds() {
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   const refreshAll = () => { reload(); staged.reload(); };
+  const refreshAfterApply = () => {
+    refreshAll();
+    if (data.autoApply) {
+      setTimeout(refreshAll, 900);
+      setTimeout(refreshAll, 2600);
+      setTimeout(refreshAll, 5000);
+    }
+  };
   const add = async () => {
     setBusy(true);
     setNotice(null);
@@ -940,11 +1564,13 @@ function Tlds() {
       setNotice({
         status: 'success',
         text: r.staged
-          ? `.${r.tld} registered — apply the staged resolver file below, then it’s a suffix you can add sites under.`
-          : `.${r.tld} registered — its resolver file was already in place, so it’s ready now.`,
+          ? data.autoApply
+            ? `.${r.tld} registered. Its resolver file is applying automatically.`
+            : `.${r.tld} registered. Apply the staged resolver file below, then it is ready for sites.`
+          : `.${r.tld} registered. Its resolver file was already in place, so it is ready now.`,
       });
       setLabel('');
-      refreshAll();
+      refreshAfterApply();
     } catch (e) {
       setNotice({ status: 'error', text: e.message });
     } finally {
@@ -957,7 +1583,7 @@ function Tlds() {
       .then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; })
       .catch((e) => ({ error: e.message }));
     if (r.error) setNotice({ status: 'error', text: r.error });
-    refreshAll();
+    refreshAfterApply();
   };
   const unstage = async (id) => {
     await fetch(`/api/observed/edits/${id}`, { method: 'DELETE' });
@@ -980,37 +1606,63 @@ function Tlds() {
         </>
       }
     >
+      <div className="ps-dnsrow">
+        <Chip tone={data.autoApply ? 'success' : 'warning'}>
+          {data.autoApply ? 'auto-apply on' : 'auto-apply off'}
+        </Chip>
+      </div>
+      {!data.autoApply && (
+        <PSNotice
+          status="warning"
+          isDismissible={false}
+          spokenMessage="Automatic resolver updates are not installed. One privileged install enables them."
+        >
+          <SudoSteps intro="One privileged install enables validated automatic resolver updates. No password or Keychain environment variable is stored." command={data.installCommand} />
+        </PSNotice>
+      )}
       {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
       {resolverEdits.length > 0 && (
         <PSNotice
           status="warning"
           isDismissible={false}
-          spokenMessage={`${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged — apply once with sudo.`}
+          spokenMessage={data.autoApply
+            ? `${resolverEdits.length} resolver edit${resolverEdits.length > 1 ? 's are' : ' is'} queued for automatic apply.`
+            : `${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged. Apply once with sudo.`}
         >
-          <SudoSteps intro={`${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged (/etc/resolver) — apply once with sudo to route the suffix to the local resolver.`} command={data.applyCommand} />
+          {data.autoApply
+            ? `${resolverEdits.length} resolver edit${resolverEdits.length > 1 ? 's are' : ' is'} queued for the root worker.`
+            : <SudoSteps intro={`${resolverEdits.length} resolver file${resolverEdits.length > 1 ? 's' : ''} staged (/etc/resolver). Apply once with sudo to route the suffix to the local resolver.`} command={data.applyCommand} />}
           <ul className="ps-editlist">
             {resolverEdits.map((e) => (
               <li key={e.id}>
                 <code>{describeEdit(e)}</code>
-                <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>
+                {!data.autoApply && <Button size="small" variant="tertiary" onClick={() => unstage(e.id)}>Cancel</Button>}
               </li>
             ))}
           </ul>
         </PSNotice>
       )}
-      <div className="ps-addrow">
-        <div className="ps-suffixfield">
-          <span>.</span>
-          <input
-            placeholder="1dr0"
-            value={label}
-            onChange={(e) => setLabel(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-            onKeyDown={(e) => { if (e.key === 'Enter' && label) add(); }}
-          />
+      <div className="ps-conversation-form">
+        <ConversationalField
+          label="Which vanity suffix should this Mac resolve?"
+          description="Dockmaster registers this suffix and prepares its resolver file. Use .test when a custom local namespace is not required."
+        >
+          <div className="ps-suffixfield">
+            <span>.</span>
+            <input
+              aria-label="Vanity suffix"
+              placeholder="example"
+              value={label}
+              onChange={(e) => setLabel(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+              onKeyDown={(e) => { if (e.key === 'Enter' && label) add(); }}
+            />
+          </div>
+        </ConversationalField>
+        <div className="ps-field-actions">
+          <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!label} onClick={add}>
+            Add TLD
+          </Button>
         </div>
-        <Button __next40pxDefaultSize variant="primary" isBusy={busy} disabled={!label} onClick={add}>
-          Add TLD
-        </Button>
       </div>
       <PSDataView
         data={data.tlds}
@@ -1030,12 +1682,12 @@ function Tlds() {
       />
       {confirm && (
         <PSNotice status="warning" onRemove={() => setConfirm(null)} spokenMessage={`Remove the .${confirm} TLD?`}>
-          Remove the <span className="ps-mono">.{confirm}</span> TLD (deregisters the suffix; stages removal of its resolver file)?{' '}
+          Remove the <span className="ps-mono">.{confirm}</span> TLD (deregisters the suffix and queues removal of its resolver file)?{' '}
           <Button size="small" variant="primary" isDestructive onClick={() => remove(confirm)}>Remove it</Button>
         </PSNotice>
       )}
       <Text className="ps-hint">
-        .test is builtin and always available. A vanity TLD adds an <span className="ps-mono">/etc/resolver/&lt;tld&gt;</span> file that routes the whole suffix to the local resolver — one privileged apply. Add sites under it from <strong>Ingress &amp; Domains</strong>, where every registered TLD shows in the suffix dropdown. Removing a TLD needs its sites gone first. Vanity suffixes resolve only on this Mac; .test is the RFC-reserved, zero-risk choice.
+        .test is builtin and always available. A vanity TLD adds an <span className="ps-mono">/etc/resolver/&lt;tld&gt;</span> file that routes the whole suffix to the local resolver. Auto-apply installs or removes it through the validated root queue. Add sites under it from <strong>Ingress &amp; Domains</strong>, where every registered TLD shows in the suffix dropdown. Removing a TLD needs its sites gone first. Vanity suffixes resolve only on this Mac; .test is the RFC-reserved, zero-risk choice.
       </Text>
     </Section>
   );
@@ -1189,12 +1841,19 @@ function Services() {
               <Button size="small" variant="tertiary" onClick={() => setEditor(null)}>Close</Button>
             </span>
           </div>
-          <textarea
-            className="ps-editor__area"
-            spellCheck={false}
-            value={editor.text}
-            onChange={(e) => setEditor({ ...editor, text: e.target.value, dirty: true })}
-          />
+          <ConversationalField
+            className="ps-expert-field"
+            label="Launchd service definition"
+            description="This expert setting controls how macOS starts the service. Save validates the plist and replaces its file. Kickstart remains a separate action."
+          >
+            <textarea
+              className="ps-editor__area"
+              aria-label="Launchd service definition"
+              spellCheck={false}
+              value={editor.text}
+              onChange={(e) => setEditor({ ...editor, text: e.target.value, dirty: true })}
+            />
+          </ConversationalField>
         </div>
       )}
     </Section>
@@ -1322,12 +1981,12 @@ function Dns() {
   );
 }
 
-// Every screen owns its permalink (house rule): /ingress, /ports, /services,
-// /dns — the server SPA-falls-back all GETs to index.html. /domains was
+// Every screen owns its permalink (house rule): /ingress, /activity, /ports,
+// /services, /dns — the server SPA-falls-back all GETs to index.html. /domains was
 // absorbed into /ingress; the old slug keeps working.
 const SLUG_ALIASES = { domains: 'ingress' };
 function usePath() {
-  const valid = NAV.map((n) => n.id);
+  const valid = [...NAV.map((n) => n.id), 'help', 'settings', 'profile'];
   const fromLocation = () => {
     const raw = window.location.pathname.replace(/^\/+/, '') || 'overview';
     const slug = SLUG_ALIASES[raw] || raw;
@@ -1347,17 +2006,56 @@ function usePath() {
   return [page, setPage];
 }
 
+function useNarrowScreen() {
+  const query = '(max-width: 760px)';
+  const [isNarrow, setIsNarrow] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = () => setIsNarrow(media.matches);
+    update();
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+  return isNarrow;
+}
+
 let noticeId = 0;
 
 export default function App() {
   const [page, setPage] = usePath();
   const [themePref, setThemePref] = useTheme();
   const [notices, setNotices] = useState([]);
-  const Page = { overview: Overview, ingress: Ingress, tlds: Tlds, ports: Ports, services: Services, remote: RemoteServices, dns: Dns }[page];
+  const [assistantOpen, setAssistantOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [tipDismissed, setTipDismissed] = useState(() => localStorage.getItem(TIP_KEY) === '1');
+  const isNarrow = useNarrowScreen();
+  const readiness = useApi('overview');
+  useEffect(() => {
+    const favicon = document.querySelector('link[rel="icon"]');
+    if (favicon) favicon.href = DOCKMASTER_MARK;
+  }, []);
+  const Page = { overview: Overview, ingress: Ingress, activity: Activity, tlds: Tlds, ports: Ports, services: Services, remote: RemoteServices, dns: Dns, help: HelpPage, settings: SettingsPage, profile: ProfilePage }[page];
+  const pageMeta = PAGE_META[page] || PAGE_META.overview;
   const [sidebarCollapsed, setSidebarCollapsedState] = useState(() => localStorage.getItem(SIDEBAR_KEY) === '1');
+  const [sidebarWidth, setSidebarWidthState] = useState(readSidebarWidth);
   const setSidebarCollapsed = useCallback((v) => {
     setSidebarCollapsedState(v);
     localStorage.setItem(SIDEBAR_KEY, v ? '1' : '0');
+  }, []);
+  const setSidebarWidth = useCallback((value) => {
+    const next = boundSidebarWidth(value);
+    setSidebarWidthState(next);
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(next));
+  }, []);
+  const navigate = useCallback((id) => {
+    setPage(id);
+    setMobileNavOpen(false);
+  }, [setPage]);
+  const openProfile = useCallback(() => navigate('profile'), [navigate]);
+  const closeProfile = useCallback(() => navigate('overview'), [navigate]);
+  const dismissTip = useCallback(() => {
+    setTipDismissed(true);
+    localStorage.setItem(TIP_KEY, '1');
   }, []);
   const dismiss = useCallback((id) => setNotices((n) => n.filter((x) => x.id !== id)), []);
   const notify = useCallback((content, status = 'success') => {
@@ -1367,38 +2065,96 @@ export default function App() {
   }, [dismiss]);
   return (
     <NotifyContext.Provider value={notify}>
-    <div className={`ps-app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}`}>
-      {sidebarCollapsed && (
-        <Button className="ps-sidebar-expand" icon={menu} label="Show sidebar" showTooltip onClick={() => setSidebarCollapsed(false)} />
-      )}
-      <aside className="ps-sidebar">
-        <Button
-          className="ps-sidebar-collapse"
-          icon={chevronLeft}
-          label="Collapse sidebar"
-          showTooltip
-          onClick={() => setSidebarCollapsed(true)}
+    <div
+      className={`ps-app${sidebarCollapsed ? ' is-sidebar-collapsed' : ''}${mobileNavOpen ? ' is-mobile-nav-open' : ''}`}
+      data-app-style="waypoint"
+      style={{ '--ps-sidebar-width': `${sidebarWidth}px` }}
+    >
+      <a className="ps-skip-link" href="#dockmaster-main">Skip to main content</a>
+      <button className="ps-sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />
+      <aside
+        className="ps-sidebar"
+        aria-label="Dockmaster navigation"
+        aria-hidden={isNarrow && !mobileNavOpen ? 'true' : undefined}
+        {...(isNarrow && !mobileNavOpen ? { inert: '' } : {})}
+      >
+        <AiChatResizeHandle
+          className="ps-sidebar__resize left-panel-resize-handle"
+          value={sidebarWidth}
+          min={SIDEBAR_WIDTH_MIN}
+          max={SIDEBAR_WIDTH_MAX}
+          onValueChange={setSidebarWidth}
+          step={16}
+          edge="right"
+          label="Resize Dockmaster sidebar"
         />
-        <div className="ps-brand">
-          <span className="ps-brand__mark">⚓</span>
-          <div>
-            <strong>Dockmaster</strong>
-            <span className="ps-brand__sub">local dev infrastructure</span>
+        <header className="ps-sidebar__header">
+          <Button
+            className="ps-sidebar-collapse"
+            icon={sidebarCollapsed ? menu : chevronLeft}
+            label={isNarrow ? 'Close navigation' : sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+            showTooltip
+            onClick={() => isNarrow ? setMobileNavOpen(false) : setSidebarCollapsed(!sidebarCollapsed)}
+          />
+          <a href="/" className="ps-brand" aria-label="Go to Dockmaster overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
+            <img className="ps-brand__mark wpds-identity-image is-mark" src={DOCKMASTER_MARK} alt="" />
+            <span className="ps-brand__copy"><strong>Dockmaster</strong><span className="ps-brand__sub">local dev infrastructure</span></span>
+          </a>
+        </header>
+        <div className="ps-sidebar__body">
+          <p className="ps-sidebar__caption">Infrastructure</p>
+          <nav className="ps-nav" aria-label="Main navigation">
+            {NAV.map((n) => (
+              <button key={n.id} title={sidebarCollapsed ? n.label : undefined} className={page === n.id ? 'is-active' : ''} aria-current={page === n.id ? 'page' : undefined} onClick={() => navigate(n.id)}><Icon icon={NAV_ICONS[n.id]} size={18} /><span className="ps-nav__label">{n.label}</span></button>
+            ))}
+          </nav>
+          <div className="ps-sidebar__utilities">
+            <Button className="ps-utility ps-utility--ask" icon={commentContent} isPressed={assistantOpen} onClick={() => { setAssistantOpen((open) => !open); setMobileNavOpen(false); }}><span className="ps-utility__label">Ask Dockmaster</span></Button>
+            <Button className={`ps-utility${page === 'help' ? ' is-active' : ''}`} icon={help} onClick={() => navigate('help')}><span className="ps-utility__label">Help &amp; Feedback</span></Button>
+            <Button className={`ps-utility${page === 'settings' ? ' is-active' : ''}`} icon={cog} onClick={() => navigate('settings')}><span className="ps-utility__label">App settings</span></Button>
           </div>
+          {!tipDismissed && (
+            <aside className="ps-tip">
+              <div className="ps-tip__head"><p className="ps-eyebrow">AI-powered tip</p><Button size="small" variant="tertiary" onClick={dismissTip}>Dismiss</Button></div>
+              <strong>Trace before you change</strong>
+              <p>Follow domain → listener → service to find the narrowest control that owns the symptom.</p>
+            </aside>
+          )}
+          <details className="ps-insights">
+            <summary>Control boundary</summary>
+            <p>Dockmaster separates read-only inspection, user-owned controls, and privileged system changes.</p>
+          </details>
         </div>
-        <nav className="ps-nav">
-          {NAV.map((n) => (
-            <button key={n.id} className={page === n.id ? 'is-active' : ''} onClick={() => setPage(n.id)}>{n.label}</button>
-          ))}
-        </nav>
-        <div className="ps-sidebar__footer">
-          <ThemeSwitch pref={themePref} onChange={setThemePref} />
-          <span>Dockmaster v{VERSION}</span>
-        </div>
+        <footer className="ps-sidebar__footer">
+          <FooterProfile onOpen={openProfile} />
+          <AppearanceShortcut pref={themePref} onOpen={() => navigate('settings')} />
+          <div className="ps-app-meta"><strong>Dockmaster</strong><span>Version {VERSION}</span></div>
+        </footer>
       </aside>
-      <main className="ps-main">
-        <Page go={setPage} />
-      </main>
+      <div className="ps-main-column">
+        <header className="ps-topbar">
+          <Button className="ps-mobile-menu" icon={menu} label="Open navigation" showTooltip onClick={() => { setAssistantOpen(false); setMobileNavOpen(true); }} />
+          <div className="ps-topbar__title"><p className="ps-eyebrow">{pageMeta.eyebrow}</p><h1>{pageMeta.title}</h1></div>
+          <div className="ps-topbar__actions">
+            <span className={`ps-readiness${readiness.error ? ' is-error' : readiness.data ? ' is-ready' : ''}`}><span aria-hidden="true" />{readiness.error ? 'Needs attention' : readiness.data ? 'Local checks ready' : 'Checking local state'}</span>
+            <Button __next40pxDefaultSize variant="primary" onClick={() => navigate('ingress')}>Register domain</Button>
+          </div>
+        </header>
+        <main id="dockmaster-main" className="ps-main" tabIndex="-1">
+          <Page go={navigate} themePref={themePref} onThemeChange={setThemePref} onDone={closeProfile} />
+        </main>
+      </div>
+      {assistantOpen && (
+        <>
+          <button className="ps-assistant-backdrop" type="button" aria-label="Close Dockmaster Assistant" onClick={() => setAssistantOpen(false)} />
+          <AssistantPanel
+            page={page}
+            appearance={themePref}
+            onNavigate={navigate}
+            onClose={() => setAssistantOpen(false)}
+          />
+        </>
+      )}
       <div className="ps-notices">
         <SnackbarList notices={notices} onRemove={dismiss} />
       </div>

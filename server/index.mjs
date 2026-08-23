@@ -7,11 +7,22 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, readdir, rename } from 'node:fs/promises';
-import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
+import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
+import { aiChatClientConfig, createAiBridgeRegistry } from './ai-bridge-config.mjs';
+import { discoverDockerWebServices } from './docker-lib.mjs';
+import {
+  bypassCovers,
+  desiredBypass,
+  readProxyState,
+  removeEntries,
+  suffixEntry,
+  writeBypass,
+} from './proxy-lib.mjs';
 import {
   createRemoteProvider,
   remoteProviderOptionsFromEnvironment,
@@ -24,6 +35,7 @@ import {
   CERTS,
   MKCERT,
   RESOLVER_DIR,
+  STATE as INGRESS_STATE,
   ensureDirs,
   readRegistry,
   readTlds,
@@ -39,6 +51,7 @@ const HOME = homedir();
 const UID = process.getuid();
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const appVersion = JSON.parse(readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+const aiRelays = createAiBridgeRegistry();
 const remoteProviderOptions = remoteProviderOptionsFromEnvironment();
 const remoteProvider = remoteProviderOptions
   ? createRemoteProvider(remoteProviderOptions)
@@ -52,10 +65,14 @@ const remoteProvider = remoteProviderOptions
     });
 
 // Every sudo command the UI hands out is derived from where this repo
-// actually lives: the hardcoded ~/ai/repos/dockmaster path went stale when
-// the repo moved to ~/os/danielk-am/repos/local in the July 2026 reorg.
+// actually lives, so repo moves do not leave this command pointing at a
+// retired location.
 const REPO = path.resolve(__dirname, '..');
 const sudoCommand = (script) => `sudo bash ${path.join(REPO, 'deploy', script).replace(HOME, '~')}`;
+const AUTO_APPLY_LABEL = 'am.danielk.local-ingress-auto-apply';
+const AUTO_APPLY_LOG = `/Library/Logs/${AUTO_APPLY_LABEL}.log`;
+const AUTO_APPLY_SUPPORT = '/Library/Application Support/Dockmaster/auto-apply.sh';
+const AUTO_APPLY_RETENTION = `/etc/newsyslog.d/${AUTO_APPLY_LABEL}.conf`;
 
 const run = (cmd, args, opts = {}) =>
   new Promise((resolve) => {
@@ -63,6 +80,45 @@ const run = (cmd, args, opts = {}) =>
       resolve({ ok: !err, stdout: String(stdout || ''), stderr: String(stderr || '') });
     });
   });
+
+// A registered system-domain job remains visible while idle, so launchctl
+// print is a stronger signal than merely finding its plist on disk.
+const autoApplyEnabled = async () => (
+  await run('/bin/launchctl', ['print', `system/${AUTO_APPLY_LABEL}`], { timeout: 2000 })
+).ok;
+
+const autoApplyActivity = () => {
+  const files = [];
+  for (let index = 30; index >= 0; index -= 1) files.push(`${AUTO_APPLY_LOG}.${index}`);
+  files.push(AUTO_APPLY_LOG);
+  const lines = files.flatMap((file) => {
+    try {
+      return readFileSync(file, 'utf8').split('\n').filter(Boolean);
+    } catch {
+      return [];
+    }
+  });
+  let workerVersion = null;
+  try {
+    const worker = readFileSync(AUTO_APPLY_SUPPORT, 'utf8');
+    if (worker.includes('AUTO_APPLY_WORKER_VERSION=2')) workerVersion = 2;
+    else if (worker.trim()) workerVersion = 1;
+  } catch { /* not installed */ }
+  let orphanedClaims = 0;
+  try {
+    orphanedClaims = readdirSync(INGRESS_STATE).filter((file) => (
+      /^(dns-pending\.conf|hosts-pending\.conf|observed-edits\.json)\.applying\.[0-9]+$/.test(file)
+    )).length;
+  } catch { /* state not seeded */ }
+  return {
+    lines: lines.slice(-200),
+    logPath: AUTO_APPLY_LOG,
+    installCommand: sudoCommand('install.sh'),
+    retentionDays: existsSync(AUTO_APPLY_RETENTION) ? 30 : null,
+    workerVersion,
+    orphanedClaims,
+  };
+};
 
 // ---------------------------------------------------------------- ports ----
 
@@ -238,8 +294,8 @@ async function dnsChain() {
 // ~/.local/share/local-ingress/ drives generated Caddy site blocks + mkcert
 // certs, all user-owned; the am.danielk.local-ingress root daemon runs
 // `caddy run --watch` over them, so registry changes apply with ZERO
-// privileges. Only new dnsmasq/hosts lines stay privileged — staged into
-// pending files, applied by deploy/apply-dns.sh.
+// privileges. Privileged DNS/hosts/resolver changes go through fixed queue
+// files; the optional root auto-apply job validates and applies them.
 
 const tcpProbe = (host, port) =>
   new Promise((resolve) => {
@@ -258,7 +314,11 @@ async function ingressState() {
   ensureDirs();
   const reg = readRegistry();
   const pending = refreshDnsPending();
-  const ingressUp = await tcpProbe(ALIAS_IP, 443);
+  const [ingressUp, autoApply, proxy] = await Promise.all([
+    tcpProbe(ALIAS_IP, 443),
+    autoApplyEnabled(),
+    proxyState(),
+  ]);
   // One launchd snapshot serves every row's linked-service state plus the
   // list of linkable agents for the UI's picker.
   const jobs = (await listLaunchd()).filter((j) => j.domain === 'user');
@@ -272,6 +332,9 @@ async function ingressState() {
         dns: await ingressDnsState(d.host),
         upstream: (await tcpProbe('127.0.0.1', d.port)) ? 'up' : 'down',
         url: `https://${d.host}`,
+        // 'shadowed' is the browser-only failure: everything below the
+        // browser is healthy, but the proxy claims the name first.
+        browser: !proxy.on || bypassCovers(proxy.exceptions, d.host) ? 'direct' : 'shadowed',
         serviceState: d.service
           ? agent
             ? { running: !!agent.running, pid: agent.pid, disabled: agent.disabled, lastExit: agent.lastExit }
@@ -282,6 +345,8 @@ async function ingressState() {
   );
   return {
     ingress: { up: ingressUp, aliasIp: ALIAS_IP, aliasIp6: ALIAS_IP6 },
+    autoApply,
+    proxy,
     dnsPending: pending,
     applyDnsCommand: sudoCommand('apply-dns.sh'),
     installCommand: sudoCommand('install.sh'),
@@ -290,12 +355,146 @@ async function ingressState() {
   };
 }
 
+// ---------------------------------------------------------- proxy reach ----
+// The last hop between a correctly served domain and a working browser. When
+// a system proxy is on, macOS hands the hostname to it BEFORE the hosts file
+// or any resolver is consulted, so a name that exists only on this machine
+// dies at the proxy (Chrome reports ERR_SOCKS_CONNECTION_FAILED). The bypass
+// list is the exemption, and it is keyed by suffix — the same unit as the
+// vanity-TLD registry — so one entry covers every site under a TLD, now and
+// later. See server/proxy-lib.mjs for why this needs no root.
+
+const registeredTlds = () => [
+  ...BUILTIN_TLDS,
+  ...readTlds().tlds.map((t) => String(t).toLowerCase()).filter((t) => !BUILTIN_TLDS.includes(t)),
+];
+const requiredBypass = () => registeredTlds().map(suffixEntry);
+
+// The staged fallback for a machine whose account cannot write proxy settings
+// directly. One op per network service, superseded by target like every other
+// queued edit.
+const PROXY_EDIT_KINDS = new Set(['proxy-bypass-set']);
+
+async function proxyState() {
+  const system = await readProxyState();
+  const required = requiredBypass();
+  // Coverage is judged against the EFFECTIVE exception list, because that is
+  // the one the browser reads. A per-service list can be correct while the
+  // active service's is not.
+  const suffixes = registeredTlds().map((tld) => ({
+    tld,
+    entry: suffixEntry(tld),
+    covered: bypassCovers(system.exceptions, `dockmaster-probe.${tld}`),
+  }));
+  const staged = readEdits().filter((e) => PROXY_EDIT_KINDS.has(e.kind));
+  const writable = system.services.filter((service) => service.readable);
+  const pendingByService = writable
+    .map((service) => ({ service, plan: desiredBypass(service.bypass, required) }))
+    .filter(({ plan }) => plan.changed);
+  return {
+    on: system.on,
+    socks: system.socks,
+    http: system.http,
+    https: system.https,
+    pac: system.pac,
+    pacUrl: system.pacUrl,
+    server: system.socksServer ? `${system.socksServer}:${system.socksPort || '?'}` : null,
+    exceptions: system.exceptions,
+    suffixes,
+    // Only a live proxy can actually shadow a name; with every proxy off the
+    // gaps are real but harmless, and saying otherwise would be a false alarm.
+    gaps: system.on ? suffixes.filter((s) => !s.covered).map((s) => s.entry) : [],
+    services: system.services.map((service) => ({
+      name: service.name,
+      enabled: service.enabled,
+      readable: service.readable,
+      bypass: service.bypass,
+      missing: service.readable ? desiredBypass(service.bypass, required).added : [],
+    })),
+    pendingServices: pendingByService.map(({ service }) => service.name),
+    staged,
+    applyCommand: APPLY_EDITS_COMMAND,
+  };
+}
+
 // ------------------------------------------------------------------ app ----
 
 const app = express();
+app.use('/api/ai', express.json({ limit: '4mb' }));
 app.use(express.json());
 
+app.get('/ai-chat-config.js', (_req, res) => {
+  const config = aiChatClientConfig(aiRelays);
+  res.type('application/javascript').set('Cache-Control', 'no-store');
+  res.send(`window.AI_CHAT_CONFIG = ${JSON.stringify(config)};`);
+});
+
+app.post('/api/ai/v1/bridges/:provider/chat/completions', async (req, res) => {
+  const entry = aiRelays.get(req.params.provider);
+  if (!entry) return res.status(404).json({ error: { message: 'Unknown or unconfigured AI bridge.' } });
+  const controller = new AbortController();
+  req.once('aborted', () => controller.abort());
+  res.once('close', () => {
+    if (!res.writableEnded) controller.abort();
+  });
+  try {
+    const response = await entry.relay({ body: req.body, signal: controller.signal });
+    res.status(response.status).set(response.headers);
+    if (typeof response.body === 'string') {
+      res.send(response.body);
+    } else {
+      res.flushHeaders();
+      Readable.fromWeb(response.body)
+        .on('error', (error) => res.destroy(error))
+        .pipe(res);
+    }
+  } catch (error) {
+    const status = Number.isInteger(error?.status) ? error.status : 502;
+    const message = status < 500 && error instanceof Error ? error.message : 'AI bridge request failed.';
+    res.status(status).set('Cache-Control', 'no-store').json({ error: { message } });
+  }
+});
+
 app.get('/api/ingress', async (_req, res) => res.json(await ingressState()));
+app.get('/api/proxy', async (_req, res) => res.json(await proxyState()));
+
+// Add every registered suffix to every network service's bypass list. The
+// write is read back before it is reported as done; a service that refuses is
+// staged for the privileged worker instead of being silently skipped.
+app.post('/api/proxy/bypass', async (_req, res) => {
+  const system = await readProxyState();
+  const required = requiredBypass();
+  const applied = [];
+  const stagedNow = [];
+  const failed = [];
+  for (const service of system.services) {
+    if (!service.readable) continue;
+    const plan = desiredBypass(service.bypass, required);
+    if (!plan.changed) continue;
+    const wrote = await writeBypass(service.name, plan.list);
+    if (wrote.ok) {
+      applied.push({ service: service.name, added: plan.added });
+      continue;
+    }
+    queueEdit({ id: randomUUID(), kind: 'proxy-bypass-set', service: service.name, domains: plan.list });
+    stagedNow.push(service.name);
+    failed.push(`${service.name}: ${wrote.error}`);
+  }
+  res.json({
+    ok: failed.length === 0,
+    applied,
+    staged: stagedNow,
+    errors: failed,
+    applyCommand: APPLY_EDITS_COMMAND,
+    // Chrome caches a failed proxy verdict per tab, so a fixed bypass still
+    // needs a reload to be believed.
+    hint: applied.length ? 'Reload the browser tab to pick up the new bypass.' : null,
+  });
+});
+app.get('/api/activity', (_req, res) => res.json(autoApplyActivity()));
+// Compatibility for clients from before Activity became its own page.
+app.get('/api/ingress/activity', (_req, res) => res.json(autoApplyActivity()));
+app.get('/api/docker/services', async (_req, res) => res.json(await discoverDockerWebServices()));
 const remoteProviderError = (res, error) => {
   if (error instanceof RemoteProviderError && error.code === 'NOT_CONFIGURED') {
     return res.status(503).json({ error: 'The remote provider is not configured.' });
@@ -366,21 +565,39 @@ app.post('/api/ingress/domains', async (req, res) => {
   reg.domains.sort((a, b) => a.host.localeCompare(b.host));
   writeRegistry(reg);
   regenerate();
+  refreshDnsPending();
   res.json({ ok: true, host });
 });
 
-// Edit = repoint an existing domain at a different upstream port, and/or
-// link/unlink the launchd agent that backs it. The host (and so its cert
-// and DNS lines) is unchanged; only a port change touches the Caddy config,
-// so only that path regenerates and reloads the watching daemon.
+// Edit = rename a domain, repoint it at a different upstream port, and/or
+// link/unlink the launchd agent that backs it. A rename mints the replacement
+// certificate before changing the registry, then stages cleanup of the old
+// privileged DNS and hosts lines.
 app.patch('/api/ingress/domains/:host', async (req, res) => {
   const host = String(req.params.host).toLowerCase();
   const reg = readRegistry();
   const entry = reg.domains.find((d) => d.host === host);
   if (!entry) return res.status(404).json({ error: 'Not registered.' });
+  const wantsHost = req.body?.host !== undefined;
   const wantsPort = req.body?.port !== undefined;
   const wantsService = req.body?.service !== undefined;
-  if (!wantsPort && !wantsService) return res.status(400).json({ error: 'Nothing to change.' });
+  if (!wantsHost && !wantsPort && !wantsService) return res.status(400).json({ error: 'Nothing to change.' });
+
+  let nextHost = host;
+  if (wantsHost) {
+    nextHost = String(req.body.host).trim().toLowerCase();
+    const splitAt = nextHost.lastIndexOf('.');
+    const name = nextHost.slice(0, splitAt);
+    const tld = nextHost.slice(splitAt + 1);
+    const validTlds = [...BUILTIN_TLDS, ...readTlds().tlds.map((item) => String(item).toLowerCase())];
+    if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name) || !validTlds.includes(tld)) {
+      return res.status(400).json({ error: 'Domain must use a valid name and a registered TLD.' });
+    }
+    if (nextHost !== host && reg.domains.some((d) => d.host === nextHost)) {
+      return res.status(409).json({ error: `${nextHost} is already registered.` });
+    }
+  }
+
   if (wantsPort) {
     const port = Number(req.body.port);
     if (!Number.isInteger(port) || port < 1 || port > 65535) {
@@ -401,9 +618,31 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
       entry.service = service;
     }
   }
+
+  if (nextHost !== host) {
+    const cert = path.join(CERTS, `${nextHost}.pem`);
+    const key = path.join(CERTS, `${nextHost}-key.pem`);
+    const mk = await run(MKCERT, ['-cert-file', cert, '-key-file', key, nextHost]);
+    if (!mk.ok) {
+      rmSync(cert, { force: true });
+      rmSync(key, { force: true });
+      return res.status(500).json({ error: `mkcert failed: ${mk.stderr.slice(0, 300)}` });
+    }
+    entry.host = nextHost;
+    reg.domains.sort((a, b) => a.host.localeCompare(b.host));
+  }
+
   writeRegistry(reg);
-  if (wantsPort) regenerate();
-  res.json({ ok: true, host, port: entry.port, service: entry.service ?? null });
+  if (wantsHost || wantsPort) regenerate();
+  if (nextHost !== host) {
+    for (const file of [`${host}.pem`, `${host}-key.pem`]) {
+      rmSync(path.join(CERTS, file), { force: true });
+    }
+    queueEdit({ id: randomUUID(), kind: 'hosts-del', name: host });
+    queueEdit({ id: randomUUID(), kind: 'dnsmasq-del', key: host });
+    refreshDnsPending();
+  }
+  res.json({ ok: true, previousHost: host, host: nextHost, port: entry.port, service: entry.service ?? null });
 });
 
 app.delete('/api/ingress/domains/:host', (req, res) => {
@@ -416,26 +655,36 @@ app.delete('/api/ingress/domains/:host', (req, res) => {
     try { rmSync(path.join(CERTS, f)); } catch { /* already gone */ }
   }
   regenerate();
+  queueEdit({ id: randomUUID(), kind: 'hosts-del', name: host });
+  queueEdit({ id: randomUUID(), kind: 'dnsmasq-del', key: host });
+  refreshDnsPending();
   res.json({ ok: true });
 });
 
 // ------------------------------------------------- observed-domain edits ----
 // The observed domains (hosts file, dnsmasq rules, resolver files) are
-// root-owned, so the server never touches them — edits are STAGED into a
-// user-owned queue and applied by one privileged run of apply-edits.sh,
-// same doctrine as the ingress DNS lines.
+// root-owned, so the server never touches them. Edits enter a user-owned
+// queue and are consumed by the root auto-apply job or a manual sudo run.
 
 const EDITS_FILE = path.join(HOME, '.local/share/local-ingress/observed-edits.json');
 const readEdits = () => { try { return JSON.parse(readFileSync(EDITS_FILE, 'utf8')); } catch { return []; } };
-const writeEdits = (edits) => writeFileSync(EDITS_FILE, JSON.stringify(edits, null, 2) + '\n');
+const writeEdits = (edits) => {
+  const tmp = `${EDITS_FILE}.${process.pid}.tmp`;
+  try {
+    writeFileSync(tmp, JSON.stringify(edits, null, 2) + '\n');
+    renameSync(tmp, EDITS_FILE);
+  } finally {
+    rmSync(tmp, { force: true });
+  }
+};
 const APPLY_EDITS_COMMAND = sudoCommand('apply-edits.sh');
 
 const HOSTNAME_RE = /^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/i;
 const IP_RE = /^((\d{1,3}\.){3}\d{1,3}|[0-9a-f:]+)$/i;
-const RESOLVER_RE = /^[a-z0-9._-]+$/i;
+const RESOLVER_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
 // One staged op per target (last wins) — the queue is intent, not history.
-const editTarget = (e) => e.kind.startsWith('hosts') ? `hosts:${e.name}` : e.kind.startsWith('dnsmasq') ? `dnsmasq:${e.key}` : `resolver:${e.file}`;
+const editTarget = (e) => e.kind.startsWith('hosts') ? `hosts:${e.name}` : e.kind.startsWith('dnsmasq') ? `dnsmasq:${e.key}` : e.kind.startsWith('proxy') ? `proxy:${e.service}` : `resolver:${e.file}`;
 // Push an op onto the queue, superseding any op already targeting the same
 // file/name/key. Shared by the observed-edit route and the vanity-TLD routes.
 const queueEdit = (edit) => {
@@ -445,7 +694,11 @@ const queueEdit = (edit) => {
   return edit;
 };
 
-app.get('/api/observed/edits', (_req, res) => res.json({ edits: readEdits(), applyCommand: APPLY_EDITS_COMMAND }));
+app.get('/api/observed/edits', async (_req, res) => res.json({
+  edits: readEdits(),
+  applyCommand: APPLY_EDITS_COMMAND,
+  autoApply: await autoApplyEnabled(),
+}));
 
 app.post('/api/observed/edits', (req, res) => {
   const { kind, name, ip, key, file, content } = req.body || {};
@@ -514,7 +767,7 @@ const validTld = (tld) => TLD_RE.test(tld) && /[a-z]/.test(tld);
 const resolverPath = (tld) => path.join(RESOLVER_DIR, tld);
 const sitesUnder = (tld) => readRegistry().domains.filter((d) => d.host.endsWith(`.${tld}`)).map((d) => d.host);
 
-function tldsState() {
+async function tldsState() {
   ensureDirs();
   const custom = readTlds().tlds.map((t) => String(t).toLowerCase());
   const all = [...BUILTIN_TLDS, ...custom.filter((t) => !BUILTIN_TLDS.includes(t))];
@@ -531,10 +784,15 @@ function tldsState() {
       hosts,
     };
   });
-  return { tlds, applyCommand: APPLY_EDITS_COMMAND };
+  return {
+    tlds,
+    applyCommand: APPLY_EDITS_COMMAND,
+    installCommand: sudoCommand('install.sh'),
+    autoApply: await autoApplyEnabled(),
+  };
 }
 
-app.get('/api/tlds', (_req, res) => res.json(tldsState()));
+app.get('/api/tlds', async (_req, res) => res.json(await tldsState()));
 
 app.post('/api/tlds', (req, res) => {
   const tld = String(req.body?.tld ?? '').trim().toLowerCase().replace(/^\./, '');
@@ -561,7 +819,7 @@ app.post('/api/tlds', (req, res) => {
   res.json({ ok: true, tld, staged, applyCommand: APPLY_EDITS_COMMAND });
 });
 
-app.delete('/api/tlds/:tld', (req, res) => {
+app.delete('/api/tlds/:tld', async (req, res) => {
   const tld = String(req.params.tld).toLowerCase().replace(/^\./, '');
   if (BUILTIN_TLDS.includes(tld)) return res.status(403).json({ error: `.${tld} is builtin and cannot be removed.` });
   const reg = readTlds();
@@ -580,7 +838,20 @@ app.delete('/api/tlds/:tld', (req, res) => {
   // Then stage removal of the resolver file, but only if it's actually on disk
   // (the dnsmasq wildcard, if any, goes inert once nothing routes the suffix).
   if (existsSync(resolverPath(tld))) queueEdit({ id: randomUUID(), kind: 'resolver-del', file: tld });
-  res.json({ ok: true, tld, applyCommand: APPLY_EDITS_COMMAND });
+  // Retire the suffix's proxy exemption too, so the bypass list does not
+  // accrete a line per experiment. Removal narrows the exemption, which is
+  // the safe direction, and it targets this one exact entry — a neighbouring
+  // entry someone else added is never touched. Best effort: a leftover entry
+  // for a suffix nothing resolves is inert, so this must not fail the delete.
+  const entry = suffixEntry(tld);
+  const proxyCleanup = [];
+  for (const service of (await readProxyState()).services) {
+    if (!service.readable) continue;
+    const plan = removeEntries(service.bypass, [entry]);
+    if (!plan.changed) continue;
+    if ((await writeBypass(service.name, plan.list)).ok) proxyCleanup.push(service.name);
+  }
+  res.json({ ok: true, tld, proxyCleanup, applyCommand: APPLY_EDITS_COMMAND });
 });
 
 app.get('/api/overview', async (_req, res) => {
