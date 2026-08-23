@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Added extra routes: a registered domain can now send one path prefix to a
+  different local port. Some apps are two services behind one origin. Coolify
+  serves its UI on 8000 while its realtime socket dials the same hostname and
+  expects the proxy to hand `/app/*` to soketi on 6001 and `/terminal/ws` to
+  6002. A single `reverse_proxy` sends those to the app, which answers with
+  HTML, and the socket sits at `unavailable` while cert, DNS, upstream, and
+  browser reach all read healthy. Registered domains gained a Routes column
+  and an **Extra routes…** action.
+- The generated site block is byte-identical for domains with no extra
+  routes, so the feature rewrites nothing that did not ask for it.
+
 - Added Browser reach to Ingress & Domains: the proxy hop between a correctly
   served domain and a working browser. A registered domain can have a minted
   cert, an applied hosts line, and a live upstream, and still fail in Chrome

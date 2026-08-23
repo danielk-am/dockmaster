@@ -39,6 +39,7 @@ import {
   ensureDirs,
   readRegistry,
   readTlds,
+  normalizeRoutes,
   refreshDnsPending,
   regenerate,
   resolverSeed,
@@ -581,7 +582,8 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
   const wantsHost = req.body?.host !== undefined;
   const wantsPort = req.body?.port !== undefined;
   const wantsService = req.body?.service !== undefined;
-  if (!wantsHost && !wantsPort && !wantsService) return res.status(400).json({ error: 'Nothing to change.' });
+  const wantsRoutes = req.body?.routes !== undefined;
+  if (!wantsHost && !wantsPort && !wantsService && !wantsRoutes) return res.status(400).json({ error: 'Nothing to change.' });
 
   let nextHost = host;
   if (wantsHost) {
@@ -619,6 +621,21 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
     }
   }
 
+  if (wantsRoutes) {
+    const submitted = req.body.routes;
+    if (submitted !== null && !Array.isArray(submitted)) {
+      return res.status(400).json({ error: 'Routes must be a list.' });
+    }
+    const routes = normalizeRoutes(submitted || []);
+    // Refuse silently-dropped input: a mistyped path should be reported, not
+    // swallowed by the normalizer that exists to protect the generated file.
+    if (submitted && routes.length !== submitted.length) {
+      return res.status(400).json({ error: 'Each route needs a path starting with / (letters, digits, . _ ~ - / *) and a port of 1-65535, with no duplicate paths.' });
+    }
+    if (routes.length) entry.routes = routes;
+    else delete entry.routes;
+  }
+
   if (nextHost !== host) {
     const cert = path.join(CERTS, `${nextHost}.pem`);
     const key = path.join(CERTS, `${nextHost}-key.pem`);
@@ -633,7 +650,7 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
   }
 
   writeRegistry(reg);
-  if (wantsHost || wantsPort) regenerate();
+  if (wantsHost || wantsPort || wantsRoutes) regenerate();
   if (nextHost !== host) {
     for (const file of [`${host}.pem`, `${host}-key.pem`]) {
       rmSync(path.join(CERTS, file), { force: true });
@@ -642,7 +659,7 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
     queueEdit({ id: randomUUID(), kind: 'dnsmasq-del', key: host });
     refreshDnsPending();
   }
-  res.json({ ok: true, previousHost: host, host: nextHost, port: entry.port, service: entry.service ?? null });
+  res.json({ ok: true, previousHost: host, host: nextHost, port: entry.port, service: entry.service ?? null, routes: entry.routes ?? [] });
 });
 
 app.delete('/api/ingress/domains/:host', (req, res) => {

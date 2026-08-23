@@ -45,6 +45,12 @@ modal, dialog, drawer, or popover.
   rules, `/etc/resolver/*`) probed two ways: system resolver vs dnsmasq.
   *Divergent* = something above dnsmasq (NextDNS, secure DNS, cache) is
   rewriting reality; *no answer* = a dead mapping.
+  **Extra routes** handle the app that is really two services behind one
+  address: a path prefix can go to a different local port while everything
+  else keeps going to the main upstream. Coolify is the worked example, with
+  its UI on 8000 and its realtime socket expecting `/app/*` on 6001 and
+  `/terminal/ws` on 6002 under the same hostname. Without that split the
+  socket reports `unavailable` while every other check reads healthy.
   **Browser reach** covers the last hop, the one below every other check.
   When a system proxy is on, macOS hands the hostname to it before the hosts
   file or any resolver is consulted, and a name that exists only on this

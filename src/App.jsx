@@ -26,7 +26,7 @@ import AssistantPanel from './AssistantPanel.jsx';
 import ConversationalField from './ConversationalField.jsx';
 import { apiGet } from './api.mjs';
 
-const VERSION = '2.14.0';
+const VERSION = '2.15.0';
 const DOCKMASTER_MARK = generatedIdentityImage('mark', 'Dockmaster');
 
 const NAV = [
@@ -387,6 +387,20 @@ const DOMAIN_FIELDS = [
   { id: 'cert', label: 'Cert', getValue: ({ item }) => (item.cert ? 'minted' : 'missing'), render: ({ item }) => (item.cert ? <Chip tone="success">minted</Chip> : <Chip tone="error">missing</Chip>) },
   { id: 'dns', label: 'DNS', getValue: ({ item }) => item.dns, aiValue: (item) => (item.dns === 'ok' ? 'resolving' : 'pending apply'), render: ({ item }) => (item.dns === 'ok' ? <Chip tone="success">resolving</Chip> : <Chip tone="warning">pending apply</Chip>) },
   { id: 'upstream', label: 'Status', getValue: ({ item }) => item.upstream, aiValue: (item) => (item.upstream === 'up' ? 'upstream up' : 'upstream down'), render: ({ item }) => (item.upstream === 'up' ? <Chip tone="success">upstream up</Chip> : <Chip tone="warning">upstream down</Chip>) },
+  // Some apps are two services behind one origin. Showing the extra routes
+  // beside the main upstream is what makes "this domain fans out" legible.
+  {
+    id: 'routes',
+    label: 'Routes',
+    enableSorting: false,
+    getValue: ({ item }) => (item.routes || []).map((r) => `${r.path}→${r.port}`).join(', '),
+    aiValue: (item) => ((item.routes || []).length
+      ? `${item.routes.map((r) => `${r.path} to port ${r.port}`).join('; ')}, everything else to ${item.port}`
+      : `everything to port ${item.port}`),
+    render: ({ item }) => ((item.routes || []).length
+      ? <span className="ps-listeners">{item.routes.map((r) => <span key={r.path} className="ps-chip ps-chip--mono">{r.path} → {r.port}</span>)}</span>
+      : <span className="ps-mono">—</span>),
+  },
   // Cert, DNS, and upstream can all read healthy while the browser still
   // cannot open the address, because the system proxy claims the name first.
   // Without this column that failure has no row to land on.
@@ -772,6 +786,7 @@ function Ingress() {
   const [ipEdit, setIpEdit] = useState(null); // { kind, name, key?, ip }
   const [resEdit, setResEdit] = useState(null); // { file, content, busy }
   const [proxyBusy, setProxyBusy] = useState(false);
+  const [routeEdit, setRouteEdit] = useState(null); // { host, rows: [{ path, port }] }
   const domainNameInput = useRef(null);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
@@ -850,6 +865,33 @@ function Ingress() {
       }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
       setNotice({ status: 'success', text: r.service ? `${r.host} is now backed by ${r.service}.` : `${r.host} has no linked service now.` });
       setSvcEdit(null);
+      reload();
+    } catch (e) {
+      setNotice({ status: 'error', text: e.message });
+    } finally {
+      setBusy(false);
+    }
+  };
+  // Extra routes: send one path prefix to a different local port. Saved on
+  // the same PATCH as the rest of the domain, so Caddy picks it up live.
+  const saveRoutes = async () => {
+    setBusy(true);
+    try {
+      const routes = routeEdit.rows
+        .filter((row) => row.path.trim() || String(row.port).trim())
+        .map((row) => ({ path: row.path.trim(), port: Number(row.port) }));
+      const r = await fetch(`/api/ingress/domains/${encodeURIComponent(routeEdit.host)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ routes }),
+      }).then(async (x) => { const b = await x.json(); if (!x.ok) throw new Error(b.error); return b; });
+      setNotice({
+        status: 'success',
+        text: r.routes.length
+          ? `${r.host} now sends ${r.routes.map((x) => `${x.path} to ${x.port}`).join(', ')}, everything else to ${r.port}.`
+          : `${r.host} sends everything to ${r.port} again.`,
+      });
+      setRouteEdit(null);
       reload();
     } catch (e) {
       setNotice({ status: 'error', text: e.message });
@@ -1209,6 +1251,16 @@ function Ingress() {
               });
             },
           },
+          {
+            id: 'routes',
+            label: 'Extra routes…',
+            callback: ([item]) => setRouteEdit({
+              host: item.host,
+              rows: (item.routes || []).length
+                ? item.routes.map((r) => ({ path: r.path, port: String(r.port) }))
+                : [{ path: '', port: '' }],
+            }),
+          },
           { id: 'service-link', label: 'Link service…', callback: ([item]) => setSvcEdit({ host: item.host, service: item.service || '' }) },
           { id: 'service-start', label: 'Start service', isEligible: (item) => !!item.service && !item.serviceState?.missing && !item.serviceState?.disabled && !item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'start') },
           { id: 'service-stop', label: 'Stop service', isDestructive: true, isEligible: (item) => !!item.service && !!item.serviceState?.running, callback: ([item]) => svcAction(item.service, 'stop') },
@@ -1299,6 +1351,67 @@ function Ingress() {
           <div className="ps-field-actions">
             <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveService}>Save link</Button>
             <Button __next40pxDefaultSize variant="tertiary" onClick={() => setSvcEdit(null)}>Cancel</Button>
+          </div>
+        </div>
+      )}
+      {routeEdit && (
+        <div className="ps-conversation-form">
+          <p className="ps-field-context"><strong>{routeEdit.host}</strong> is the address being split across ports.</p>
+          <ConversationalField
+            label="Which paths should go to a different port?"
+            description="Most domains need none. Add one only when the app is really two services behind one address, like a UI on one port and its websocket on another. Anything not listed keeps going to the main upstream port."
+          >
+            <div className="ps-routerows">
+              {routeEdit.rows.map((row, index) => (
+                <div className="ps-routerow" key={index}>
+                  <input
+                    className="ps-search"
+                    aria-label={`Path ${index + 1}`}
+                    placeholder="/app/*"
+                    value={row.path}
+                    onChange={(e) => setRouteEdit({
+                      ...routeEdit,
+                      rows: routeEdit.rows.map((r, i) => (i === index ? { ...r, path: e.target.value } : r)),
+                    })}
+                  />
+                  <span className="ps-routerow__arrow" aria-hidden="true">→</span>
+                  <input
+                    className="ps-search ps-portinput"
+                    aria-label={`Port for path ${index + 1}`}
+                    placeholder="6001"
+                    inputMode="numeric"
+                    value={row.port}
+                    onChange={(e) => setRouteEdit({
+                      ...routeEdit,
+                      rows: routeEdit.rows.map((r, i) => (i === index ? { ...r, port: e.target.value.replace(/\D/g, '') } : r)),
+                    })}
+                  />
+                  <Button
+                    __next40pxDefaultSize
+                    variant="tertiary"
+                    isDestructive
+                    aria-label={`Remove path ${index + 1}`}
+                    onClick={() => setRouteEdit({
+                      ...routeEdit,
+                      rows: routeEdit.rows.length > 1
+                        ? routeEdit.rows.filter((_, i) => i !== index)
+                        : [{ path: '', port: '' }],
+                    })}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </ConversationalField>
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="secondary" onClick={() => setRouteEdit({ ...routeEdit, rows: [...routeEdit.rows, { path: '', port: '' }] })}>
+              Add another path
+            </Button>
+          </div>
+          <div className="ps-field-actions">
+            <Button __next40pxDefaultSize variant="primary" isBusy={busy} onClick={saveRoutes}>Save routes</Button>
+            <Button __next40pxDefaultSize variant="tertiary" onClick={() => setRouteEdit(null)}>Cancel</Button>
           </div>
         </div>
       )}

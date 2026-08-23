@@ -464,6 +464,14 @@ body {
 .ps-editlist li { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .ps-editlist code { font-family: SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; }
 
+/* Extra-route editor: path and port read as one control pair, with 16px
+   between rows so a three-route domain does not look like one block. */
+.ps-routerows { display: flex; flex-direction: column; gap: 16px; }
+.ps-routerow { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.ps-routerow .ps-search { flex: 1 1 200px; min-width: 0; }
+.ps-routerow .ps-portinput { flex: 0 0 120px; }
+.ps-routerow__arrow { color: var(--ps-muted, #666); }
+
 /* Browser reach: the proxy hop between a correctly served domain and a
    working browser. One card so the suffix verdicts and the fix that changes
    them read as a single group, not three stray rows under the table. */
