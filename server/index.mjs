@@ -546,6 +546,10 @@ app.post('/api/ingress/domains', async (req, res) => {
   const name = String(req.body?.name ?? req.body?.host ?? '').trim().toLowerCase().replace(new RegExp(`\\.${tld}$`), '');
   const host = `${name}.${tld}`;
   const port = Number(req.body?.port);
+  // An upstream that terminates TLS itself and routes by Host header, e.g. a
+  // Coolify app behind the VM's proxy, is reached over https with the cert
+  // unverified. See proxyLine in ingress-lib.
+  const tls = req.body?.tls === true || req.body?.tls === 'true';
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
     return res.status(400).json({ error: `Name must be letters/digits/hyphens (the .${tld} suffix is automatic).` });
   }
@@ -562,7 +566,7 @@ app.post('/api/ingress/domains', async (req, res) => {
     host,
   ]);
   if (!mk.ok) return res.status(500).json({ error: `mkcert failed: ${mk.stderr.slice(0, 300)}` });
-  reg.domains.push({ host, port });
+  reg.domains.push({ host, port, ...(tls ? { tls: true } : {}) });
   reg.domains.sort((a, b) => a.host.localeCompare(b.host));
   writeRegistry(reg);
   regenerate();
@@ -583,7 +587,8 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
   const wantsPort = req.body?.port !== undefined;
   const wantsService = req.body?.service !== undefined;
   const wantsRoutes = req.body?.routes !== undefined;
-  if (!wantsHost && !wantsPort && !wantsService && !wantsRoutes) return res.status(400).json({ error: 'Nothing to change.' });
+  const wantsTls = req.body?.tls !== undefined;
+  if (!wantsHost && !wantsPort && !wantsService && !wantsRoutes && !wantsTls) return res.status(400).json({ error: 'Nothing to change.' });
 
   let nextHost = host;
   if (wantsHost) {
@@ -619,6 +624,11 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
       if (!job) return res.status(404).json({ error: `No user agent labelled ${service}.` });
       entry.service = service;
     }
+  }
+
+  if (wantsTls) {
+    if (req.body.tls === true || req.body.tls === 'true') entry.tls = true;
+    else delete entry.tls;
   }
 
   if (wantsRoutes) {
