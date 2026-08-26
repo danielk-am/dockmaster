@@ -1,13 +1,13 @@
 {
   "name": "dockmaster",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "private": true,
   "type": "module",
   "description": "Dockmaster \u2014 local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "test": "node test/family-shell.mjs && node test/family-ui-contract.mjs && node test/ai-bridge-config.mjs && node test/auto-apply.mjs && node test/proxy-bypass.mjs && node test/ingress-routes.mjs && node test/docker-discovery.mjs && node test/remote-provider.mjs && node test/api-client.mjs",
+    "test": "node test/family-shell.mjs && node test/family-ui-contract.mjs && node test/ai-bridge-config.mjs && node test/auto-apply.mjs && node test/proxy-bypass.mjs && node test/ingress-routes.mjs && node test/docker-discovery.mjs && node test/launchd-create.mjs && node test/remote-provider.mjs && node test/api-client.mjs",
     "serve": "node server/index.mjs",
     "start": "npm run build && node server/index.mjs"
   },

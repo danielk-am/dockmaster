@@ -7,7 +7,7 @@ import express from 'express';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { readFile, readdir, rename } from 'node:fs/promises';
-import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createConnection } from 'node:net';
 import { homedir } from 'node:os';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { aiChatClientConfig, createAiBridgeRegistry } from './ai-bridge-config.mjs';
 import { discoverDockerWebServices } from './docker-lib.mjs';
+import { buildAgentPlist, defaultLogPaths, validateAgentSpec, OWNED_LABEL } from './launchd-lib.mjs';
 import {
   bypassCovers,
   desiredBypass,
@@ -1006,6 +1007,85 @@ app.put('/api/launchd/:label/plist', async (req, res) => {
   }
   await rename(tmp, job.file);
   res.json({ ok: true, path: job.file });
+});
+
+// ------------------------------------------------------- create / remove ----
+// Everything above manages agents that already exist. These two make and unmake
+// them, so a new service no longer means hand-writing XML into LaunchAgents.
+// User domain and owned labels only, same as the lifecycle routes.
+
+// Writes plist XML through plutil before it lands, then optionally loads it.
+// The write is the same validate-then-swap the editor uses: a candidate file is
+// linted and round-tripped, and only replaces nothing if it survives.
+app.post('/api/launchd', async (req, res) => {
+  const spec = req.body ?? {};
+  const problems = validateAgentSpec(spec);
+  if (problems.length) return res.status(400).json({ error: problems[0], problems });
+
+  const file = path.join(AGENTS_DIR, `${spec.label}.plist`);
+  // Catch a parked twin too: creating am.danielk.x while am.danielk.x.plist.disabled
+  // sits there would silently resurrect the old one at next login.
+  const existing = (await listLaunchd()).find((j) => j.label === spec.label);
+  if (existing || existsSync(file)) {
+    return res.status(409).json({ error: `${spec.label} already exists at ${existing?.file ?? file}.`, file: existing?.file ?? file });
+  }
+
+  // launchd has no PATH of its own, so a missing or non-executable program is
+  // the most common way a new agent ends up crash-looping. Fail now instead.
+  const program = spec.program[0];
+  if (!existsSync(program)) return res.status(400).json({ error: `${program} does not exist.` });
+  try {
+    accessSync(program, fsConstants.X_OK);
+  } catch {
+    return res.status(400).json({ error: `${program} is not executable.` });
+  }
+
+  const logs = defaultLogPaths(HOME, spec.label);
+  const stdoutPath = spec.stdoutPath ?? logs.stdoutPath;
+  const stderrPath = spec.stderrPath ?? logs.stderrPath;
+  for (const dir of new Set([path.dirname(stdoutPath), path.dirname(stderrPath)])) {
+    mkdirSync(dir, { recursive: true });
+  }
+
+  const content = buildAgentPlist({ ...spec, stdoutPath, stderrPath });
+  const tmp = `${file}.dockmaster-new`;
+  const { writeFile, rename: renameAsync } = await import('node:fs/promises');
+  await writeFile(tmp, content, 'utf8');
+  const lint = await run('plutil', ['-lint', tmp]);
+  const meta = lint.ok ? await plistToJson(tmp) : null;
+  if (!meta || typeof meta !== 'object' || Array.isArray(meta) || meta.Label !== spec.label) {
+    rmSync(tmp, { force: true });
+    return res.status(400).json({ error: `Generated plist did not validate: ${(lint.stderr || lint.stdout || 'not a launchd dictionary').trim().slice(0, 300)}` });
+  }
+  await renameAsync(tmp, file);
+
+  let loaded = false;
+  let loadError = null;
+  if (spec.load !== false) {
+    const r = await run('launchctl', ['bootstrap', `gui/${UID}`, file]);
+    loaded = r.ok;
+    // The plist is written either way; report the load failure rather than
+    // rolling back, so the user can fix it in the editor that already exists.
+    if (!r.ok) loadError = (r.stderr || r.stdout || 'launchctl bootstrap failed.').trim().slice(0, 300);
+  }
+
+  res.status(201).json({ ok: true, label: spec.label, file, loaded, loadError, stdoutPath, stderrPath });
+});
+
+// Boots the agent out and removes its plist. Logs are deliberately kept: they
+// are usually the reason someone is removing the thing.
+app.delete('/api/launchd/:label', async (req, res) => {
+  const label = req.params.label;
+  if (!OWNED_LABEL.test(label)) {
+    return res.status(403).json({ error: 'Only your own am.danielk./com.danielkam./dev.1dr0. agents can be removed.' });
+  }
+  const job = (await listLaunchd()).find((j) => j.label === label && j.domain === 'user');
+  if (!job) return res.status(404).json({ error: 'Not a user-domain agent (system daemons need sudo in a terminal).' });
+  if (!plistEditable(job)) return res.status(403).json({ error: 'Only agents under ~/Library/LaunchAgents can be removed here.' });
+
+  await run('launchctl', ['bootout', `gui/${UID}/${label}`]);
+  rmSync(job.file, { force: true });
+  res.json({ ok: true, label, removed: job.file, logsKept: job.log ?? null });
 });
 
 // ---------------------------------------------------- service lifecycle ----

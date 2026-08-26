@@ -26,7 +26,7 @@ import AssistantPanel from './AssistantPanel.jsx';
 import ConversationalField from './ConversationalField.jsx';
 import { apiGet } from './api.mjs';
 
-const VERSION = '2.15.0';
+const VERSION = '2.16.0';
 const DOCKMASTER_MARK = generatedIdentityImage('mark', 'Dockmaster');
 
 const NAV = [
@@ -501,6 +501,45 @@ const PORT_FIELDS = [
   { id: 'pid', label: 'PID', getValue: ({ item }) => item.pid || 0, render: ({ item }) => <span className="ps-mono">{item.pid || '—'}</span> },
   { id: 'flags', label: 'Flags', enableSorting: false, getValue: ({ item }) => (item.shared ? 'shared port' : ''), render: ({ item }) => (item.shared ? <Chip tone="warning">shared port</Chip> : null) },
 ];
+
+// A new agent, as the form holds it. The server takes a structured spec, so
+// the free-text fields are parsed here rather than sent raw.
+const NEW_AGENT = { label: '', command: '', cwd: '', env: '', keepAlive: 'always', runAtLoad: true };
+
+// Split a command line on whitespace, keeping quoted runs together, so an
+// argument containing a space survives ("--msg 'hello world'").
+function splitCommand(line) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(line)) !== null) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+
+function parseEnv(text) {
+  const env = {};
+  for (const raw of String(text).split('\n')) {
+    const line = raw.trim();
+    if (!line || line.startsWith('#')) continue;
+    const eq = line.indexOf('=');
+    if (eq < 1) continue;
+    env[line.slice(0, eq).trim()] = line.slice(eq + 1).trim();
+  }
+  return env;
+}
+
+function agentSpecFromDraft(draft) {
+  const env = parseEnv(draft.env);
+  return {
+    label: draft.label.trim(),
+    program: splitCommand(draft.command.trim()),
+    workingDirectory: draft.cwd.trim() || undefined,
+    environment: Object.keys(env).length ? env : undefined,
+    keepAlive: draft.keepAlive,
+    runAtLoad: draft.runAtLoad,
+    comment: 'Created with Dockmaster.',
+  };
+}
 
 const SERVICE_FIELDS = [
   { id: 'label', label: 'Label', getValue: ({ item }) => item.label, render: ({ item }) => <span className="ps-mono">{item.label}</span>, enableGlobalSearch: true },
@@ -1853,6 +1892,10 @@ function Services() {
   const [panel, setPanel] = useState(null); // { title, lines }
   const [editor, setEditor] = useState(null); // { label, path, text, dirty, busy }
   const [notice, setNotice] = useState(null);
+  const [adding, setAdding] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null);
+  const [draft, setDraft] = useState(NEW_AGENT);
   if (error) return <PSNotice status="error" isDismissible={false}>{error}</PSNotice>;
   if (!data) return <Spinner />;
   // Disabled agents (plist parked under a .disabled suffix) list too, so they
@@ -1900,6 +1943,36 @@ function Services() {
       : { status: 'error', text: r.error || 'Failed.' });
     setTimeout(reload, 700);
   };
+  // Create: the server validates the spec, lints the generated plist, and only
+  // then writes it. A load failure still leaves the plist, so it can be fixed
+  // in the editor rather than silently rolled back.
+  const createAgent = async () => {
+    setBusy(true);
+    const r = await fetch('/api/launchd', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(agentSpecFromDraft(draft)),
+    }).then((x) => x.json());
+    setBusy(false);
+    if (r.error) return setNotice({ status: 'error', text: r.error });
+    setNotice({
+      status: r.loaded ? 'success' : 'warning',
+      text: r.loaded
+        ? `${r.label} created and loaded. Logs: ${r.stdoutPath}`
+        : `${r.label} written to ${r.file}, but launchctl refused it: ${r.loadError}. Fix it with Edit plist, then Start.`,
+    });
+    setDraft(NEW_AGENT);
+    setAdding(false);
+    setTimeout(reload, 700);
+  };
+  const removeAgent = async (label) => {
+    setConfirmRemove(null);
+    const r = await fetch(`/api/launchd/${encodeURIComponent(label)}`, { method: 'DELETE' }).then((x) => x.json());
+    setNotice(r.ok
+      ? { status: 'success', text: `${label} removed. Its logs were kept.` }
+      : { status: 'error', text: r.error || 'Failed.' });
+    setTimeout(reload, 700);
+  };
   const actions = [
     { id: 'start', label: 'Start', callback: ([item]) => lifecycle(item.label, 'start'), isEligible: (item) => item.domain === 'user' && !item.disabled && !item.running },
     { id: 'stop', label: 'Stop', isDestructive: true, callback: ([item]) => lifecycle(item.label, 'stop'), isEligible: (item) => item.domain === 'user' && !!item.running },
@@ -1909,6 +1982,7 @@ function Services() {
     { id: 'edit', label: 'Edit plist', callback: ([item]) => openEditor(item.label), isEligible: (item) => item.domain === 'user' },
     { id: 'plist', label: 'View plist', callback: ([item]) => showFile(item.label, 'plist'), isEligible: (item) => item.domain !== 'user' },
     { id: 'kickstart', label: 'Kickstart', callback: ([item]) => kick(item.label), isEligible: (item) => item.domain === 'user' && !item.disabled },
+    { id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmRemove(item.label), isEligible: (item) => item.domain === 'user' },
   ];
   const sectionPrompt = () => aiPrompt({
     subject: `Below, from Dockmaster: ${AI_WHAT.services}.`,
@@ -1921,11 +1995,100 @@ function Services() {
       actions={
         <>
           <CopyForAI build={sectionPrompt} what="every launchd agent you own" />
+          <Button __next40pxDefaultSize variant={adding ? 'secondary' : 'primary'} onClick={() => setAdding((v) => !v)}>
+            {adding ? 'Cancel' : 'Add agent'}
+          </Button>
           <Button __next40pxDefaultSize variant="secondary" onClick={reload}>Refresh</Button>
         </>
       }
     >
       {notice && <PSNotice status={notice.status} onRemove={() => setNotice(null)}>{notice.text}</PSNotice>}
+      {confirmRemove && (
+        <PSNotice status="warning" onRemove={() => setConfirmRemove(null)} spokenMessage={`Remove ${confirmRemove}?`}>
+          Remove <span className="ps-mono">{confirmRemove}</span>? This unloads it and deletes its plist. Its logs are kept.{' '}
+          <Button size="small" variant="primary" isDestructive onClick={() => removeAgent(confirmRemove)}>Remove it</Button>
+        </PSNotice>
+      )}
+      {adding && (
+        <div className="ps-conversation-form">
+          <ConversationalField
+            label="What should this agent be called?"
+            description="Labels must start with am.danielk., com.danielkam. or dev.1dr0. Dockmaster only manages agents it owns."
+          >
+            <input
+              aria-label="Label"
+              placeholder="am.danielk.my-service"
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value.trim() })}
+            />
+          </ConversationalField>
+          <ConversationalField
+            label="What should it run?"
+            description="An absolute path, then its arguments. launchd has no PATH of its own, so a bare command name will not resolve."
+          >
+            <input
+              aria-label="Command"
+              placeholder="/opt/homebrew/bin/node /Users/you/app/server.js --port 4000"
+              value={draft.command}
+              onChange={(e) => setDraft({ ...draft, command: e.target.value })}
+            />
+          </ConversationalField>
+          <ConversationalField
+            label="Where should it run, and with what environment?"
+            description="Working directory is optional. Environment is one KEY=VALUE per line; anything the process needs on PATH belongs here."
+          >
+            <input
+              aria-label="Working directory"
+              placeholder="/Users/you/app"
+              value={draft.cwd}
+              onChange={(e) => setDraft({ ...draft, cwd: e.target.value.trim() })}
+            />
+            <textarea
+              aria-label="Environment variables"
+              rows={3}
+              placeholder={'PATH=/opt/homebrew/bin:/usr/bin:/bin\nNODE_ENV=production'}
+              value={draft.env}
+              onChange={(e) => setDraft({ ...draft, env: e.target.value })}
+            />
+          </ConversationalField>
+          <ConversationalField
+            label="When should it run?"
+            description="Keep alive restarts it whenever it stops. Crash only restarts it after a non-zero exit. At login runs it once when you log in."
+          >
+            <PopoverSelect
+              label="Restart policy"
+              hideLabelFromVision
+              value={draft.keepAlive}
+              options={[
+                { value: 'always', label: 'Keep alive, always' },
+                { value: 'crash-only', label: 'Restart only after a crash' },
+                { value: 'never', label: 'Do not restart' },
+              ]}
+              onChange={(value) => setDraft({ ...draft, keepAlive: value })}
+              size="compact"
+            />
+            <label className="ps-checkline">
+              <input
+                type="checkbox"
+                checked={draft.runAtLoad}
+                onChange={(e) => setDraft({ ...draft, runAtLoad: e.target.checked })}
+              />
+              Start it at login
+            </label>
+          </ConversationalField>
+          <div className="ps-field-actions">
+            <Button
+              __next40pxDefaultSize
+              variant="primary"
+              isBusy={busy}
+              disabled={!draft.label || !draft.command.trim()}
+              onClick={createAgent}
+            >
+              Create and load
+            </Button>
+          </div>
+        </div>
+      )}
       <PSDataView
         data={rows}
         fields={SERVICE_FIELDS}

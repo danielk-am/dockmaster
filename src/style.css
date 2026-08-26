@@ -671,3 +671,16 @@ body {
 :root[data-theme='dark'] .ps-dataviews .ps-mono {
 	color: var(--ps-text);
 }
+
+/* Inline checkbox inside a conversational field, e.g. "Start it at login". */
+.ps-checkline {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  margin-top: 8px;
+}
+.ps-checkline input {
+  width: auto;
+  margin: 0;
+}

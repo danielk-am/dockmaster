@@ -2,7 +2,7 @@
 
 The local dev infrastructure control plane for one Mac: every listening
 port and who owns it, every local domain and what it *actually* resolves
-to, your launchd services with editing/kickstart/log tail, the DNS chain
+to, your launchd services with create/remove/editing/kickstart/log tail, the DNS chain
 in the order it really answers — and the portless `*.test` ingress
 manager (registry → Caddy site blocks → mkcert certs) absorbed from the
 old Local Ingress tool.
@@ -77,13 +77,17 @@ modal, dialog, drawer, or popover.
   arrangement), and SIGTERM for listeners you own.
 - **Services** — your `am.danielk.*` / `com.danielkam.*` / `dev.1dr0.*`
   launchd jobs, user and system domain, with state, last exit code, log
-  tail, kickstart, and in-place plist **editing** for user agents (saves
-  are `plutil`-linted before they replace the live file; system daemons
-  stay read-only with sudo steps). Full lifecycle for user agents:
-  **Start/Stop** (bootstrap/bootout in the gui domain) and
-  **Enable/Disable** — disabling parks the plist under a `.disabled`
-  suffix (the convention the archive folders already use) so login skips
-  it, and disabled agents stay listed for one-click re-enable.
+  tail, plist view and edit, start, stop, enable, disable and kickstart.
+  **Add agent** creates one from a form: label, absolute command and
+  arguments, working directory, environment, and when it should run. The
+  server validates the spec, checks the program exists and is executable
+  (launchd has no `PATH`, so a bare command name is the usual cause of a
+  crash-looping agent), lints the generated plist with `plutil`, writes it,
+  then loads it. **Remove** boots the agent out and deletes its plist,
+  keeping the logs, which are usually why you are removing it.
+  Owned labels in the user domain only; system daemons stay sudo-in-a-
+  terminal territory.
+
 - **DNS chain** — scoped resolvers, default upstream, NextDNS/dnsmasq
   liveness, and the practical order of authority.
 - **Activity** — the final sidebar item: the auto-apply worker’s validated

@@ -2,6 +2,35 @@
 
 ## Unreleased
 
+- Launchd agents can now be **created and removed**, not only managed. Every
+  other verb was already here (start, stop, enable, disable, kickstart, log
+  tail, plist view and edit), so a new service still meant hand-writing XML
+  into `~/Library/LaunchAgents` and a dead one meant `launchctl bootout` plus
+  `rm` in a terminal. **Add agent** takes a label, an absolute command and its
+  arguments, an optional working directory and environment, and when it should
+  run. **Remove** boots the agent out and deletes its plist, keeping its logs.
+- The create path fails early where launchd fails late. It refuses a label
+  outside the owned namespace, a relative program path, a program that does not
+  exist or is not executable, and an agent with no trigger at all (no keep
+  alive, no run at load, no interval), which would otherwise be created and
+  simply never run. launchd has no `PATH` of its own, so a bare command name is
+  the most common reason a new agent crash-loops; that is now a 400 rather than
+  a mystery in a log.
+- The generated plist goes through the same validate-then-swap the editor uses:
+  `plutil -lint`, then a round-trip check that it is a dictionary declaring the
+  label asked for, before it lands. A plist that fails is never written. A
+  plist that writes but fails to load is kept, with the launchctl error
+  reported, so it can be fixed in the editor rather than silently rolled back.
+- Creating an agent whose label already exists is refused, including when the
+  existing copy is parked under a `.disabled` suffix. Creating over one of
+  those would have silently resurrected the old agent at next login.
+- Restart policy is a real choice: keep alive always, restart only after a
+  crash (`KeepAlive` as a `SuccessfulExit` dict), or never. "Never" omits the
+  key rather than writing `false`.
+- `server/launchd-lib.mjs` holds the spec validation and plist builder as pure
+  functions, covered by `test/launchd-create.mjs`, including XML escaping and
+  a comment that cannot break out of its own comment.
+
 - Added extra routes: a registered domain can now send one path prefix to a
   different local port. Some apps are two services behind one origin. Coolify
   serves its UI on 8000 while its realtime socket dials the same hostname and
