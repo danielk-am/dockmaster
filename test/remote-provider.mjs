@@ -325,7 +325,7 @@ await assert.rejects(
 
 const serverSource = readFileSync(new URL('../server/index.mjs', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('../src/App.jsx', import.meta.url), 'utf8');
-assert.match(serverSource, /\/api\/providers\/dk-sin1\/services/);
+assert.match(serverSource, /\/api\/providers\/dk-fsn1\/services/);
 assert.match(serverSource, /remoteProvider\.request\(\{ action: 'inventory' \}\)/);
 assert.match(serverSource, /remoteProvider\.request\(\{ action, project, service \}\)/);
 assert.match(appSource, /\{ id: 'remote', label: 'Remote services' \}/);

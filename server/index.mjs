@@ -507,10 +507,10 @@ const remoteProviderError = (res, error) => {
   if (error instanceof RemoteProviderError && error.code === 'NOT_ALLOWLISTED') {
     return res.status(403).json({ error: 'Remote provider action is not allowlisted.' });
   }
-  return res.status(502).json({ error: 'The dk-sin1 provider is unavailable.' });
+  return res.status(502).json({ error: 'The dk-fsn1 provider is unavailable.' });
 };
 
-app.get('/api/providers/dk-sin1/services', async (_req, res) => {
+app.get('/api/providers/dk-fsn1/services', async (_req, res) => {
   try {
     res.json(await remoteProvider.request({ action: 'inventory' }));
   } catch (error) {
@@ -518,7 +518,7 @@ app.get('/api/providers/dk-sin1/services', async (_req, res) => {
   }
 });
 
-app.get('/api/providers/dk-sin1/audit', async (_req, res) => {
+app.get('/api/providers/dk-fsn1/audit', async (_req, res) => {
   try {
     res.json(await remoteProvider.request({ action: 'audit' }));
   } catch (error) {
@@ -526,7 +526,7 @@ app.get('/api/providers/dk-sin1/audit', async (_req, res) => {
   }
 });
 
-app.post('/api/providers/dk-sin1/services/action', async (req, res) => {
+app.post('/api/providers/dk-fsn1/services/action', async (req, res) => {
   const { action, project, service } = req.body || {};
   try {
     res.json(await remoteProvider.request({ action, project, service }));

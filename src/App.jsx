@@ -659,7 +659,7 @@ const AI_WHAT = {
   tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
   services: 'the launchd agents I own on this machine, including disabled ones (their plist is parked under a .disabled suffix so login skips them)',
-  remote: 'the explicitly allowlisted Docker Compose services on dk-sin1 returned by Localhost Manager through its forced-command SSH provider',
+  remote: 'the explicitly allowlisted Docker Compose services on dk-fsn1 returned by Localhost Manager through its forced-command SSH provider',
   dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
 };
 
@@ -2137,14 +2137,14 @@ function Services() {
 }
 
 function RemoteServices() {
-  const inventory = useApi('providers/dk-sin1/services');
-  const audit = useApi('providers/dk-sin1/audit');
+  const inventory = useApi('providers/dk-fsn1/services');
+  const audit = useApi('providers/dk-fsn1/audit');
   const notify = useNotify();
   if (inventory.error) return <PSNotice status="error" isDismissible={false}>{inventory.error}</PSNotice>;
   if (!inventory.data) return <Spinner />;
   const lifecycle = async (item, action) => {
-    if (['stop', 'restart'].includes(action) && !window.confirm(`${action} ${item.projectId}/${item.name} on dk-sin1?`)) return;
-    const response = await fetch('/api/providers/dk-sin1/services/action', {
+    if (['stop', 'restart'].includes(action) && !window.confirm(`${action} ${item.projectId}/${item.name} on dk-fsn1?`)) return;
+    const response = await fetch('/api/providers/dk-fsn1/services/action', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action, project: item.projectId, service: item.name }),
@@ -2185,10 +2185,10 @@ function RemoteServices() {
   ));
   return (
     <Section
-      title="Remote services on dk-sin1"
+      title="Remote services on dk-fsn1"
       actions={
         <>
-          <CopyForAI build={sectionPrompt} what="the dk-sin1 service inventory" />
+          <CopyForAI build={sectionPrompt} what="the dk-fsn1 service inventory" />
           <Button __next40pxDefaultSize variant="secondary" onClick={() => { inventory.reload(); audit.reload(); }}>Refresh</Button>
         </>
       }
