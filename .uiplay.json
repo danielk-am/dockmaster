@@ -1,11 +1,11 @@
 {
   "schema": "wpds-app-uiplay/v1",
   "app": {
-    "title": "Dockmaster",
+    "title": "Localhost Manager",
     "overview_route": "overview",
     "identity": {
       "type": "generated-app-mark",
-      "label": "Dockmaster",
+      "label": "Localhost Manager",
       "fallback": "deterministic-app-mark"
     },
     "style": {

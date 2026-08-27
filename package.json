@@ -1,9 +1,9 @@
 {
-  "name": "dockmaster",
+  "name": "localhost-manager",
   "version": "2.16.0",
   "private": true,
   "type": "module",
-  "description": "Dockmaster \u2014 local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
+  "description": "Localhost Manager \u2014 local dev infrastructure dashboard + portless *.test ingress manager, in WordPress Design Language",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

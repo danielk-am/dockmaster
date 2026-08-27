@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Restricted remote Docker provider used by Dockmaster's forced SSH command."""
+"""Restricted remote Docker provider used by Localhost Manager's forced SSH command."""
 
 from __future__ import annotations
 

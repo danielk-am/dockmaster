@@ -32,7 +32,7 @@ const requestProtocol = (protocol, host, port, timeout) => new Promise((resolve)
     port,
     path: '/',
     method: 'HEAD',
-    headers: { 'User-Agent': 'Dockmaster Docker discovery' },
+    headers: { 'User-Agent': 'Localhost Manager Docker discovery' },
     rejectUnauthorized: false,
   }, (response) => {
     const statusCode = response.statusCode || null;

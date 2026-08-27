@@ -1,6 +1,6 @@
 # Restricted remote provider
 
-This provider lets Dockmaster inventory and operate only explicitly listed
+This provider lets Localhost Manager inventory and operate only explicitly listed
 Docker Compose services on a remote Linux host. It uses a forced SSH command,
 a locked system account without Docker group membership, and a root helper
 whose request grammar, manifest targets, actions, paths, and output are
@@ -8,7 +8,7 @@ validated before use.
 
 ## Configure the server
 
-Dockmaster enables the adapter only when all three variables are present:
+Localhost Manager enables the adapter only when all three variables are present:
 
 ```sh
 export DOCKMASTER_REMOTE_PROVIDER_HOST=provider.example
@@ -35,7 +35,7 @@ sudo ./readback.sh
 The installer accepts one Ed25519 public key. It installs a forced command,
 root-owned code and manifest, a narrow sudoers entry, private state, and an
 append-only audit log. The example blocks standard Coolify-managed roots so a
-Dockmaster manifest cannot take ownership of Coolify services.
+Localhost Manager manifest cannot take ownership of Coolify services.
 
 `rollback.sh` removes the provider account, command wrappers, manifest, and
 state. It preserves the audit log.

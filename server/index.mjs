@@ -1,4 +1,4 @@
-// Dockmaster — local dev infrastructure dashboard server.
+// Localhost Manager — local dev infrastructure dashboard server.
 // Views over listening ports, local domains, launchd services, and the DNS
 // chain, plus management: the ingress domain registry (add/edit/remove),
 // SIGTERM on your own listeners, and editing/kickstarting your own launchd
@@ -838,7 +838,7 @@ app.post('/api/tlds', (req, res) => {
   reg.tlds.sort();
   writeTlds(reg);
   // Stage the resolver file only when it isn't already on disk (the .a8c /
-  // .1dr0 files predate Dockmaster, so re-adding them needs no sudo).
+  // .1dr0 files predate Localhost Manager, so re-adding them needs no sudo).
   let staged = false;
   if (!existsSync(resolverPath(tld))) {
     queueEdit({ id: randomUUID(), kind: 'resolver-write', file: tld, content: resolverSeed() });
@@ -1158,4 +1158,4 @@ app.post('/api/launchd/:label/enable', async (req, res) => {
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')));
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Dockmaster v${appVersion} on http://127.0.0.1:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => console.log(`Localhost Manager v${appVersion} on http://127.0.0.1:${PORT}`));

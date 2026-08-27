@@ -58,7 +58,7 @@ if (!primaryMissingOrEmpty && readFileSync(EDITS_FILE, 'utf8').trim() === '[]' &
   process.exit(0);
 }
 
-// Claim one immutable queue generation. Dockmaster may immediately create a
+// Claim one immutable queue generation. Localhost Manager may immediately create a
 // replacement queue; that file is not cleared when this generation finishes.
 const owner = statSync(STATE);
 const recoveringStale = staleClaims.length > 0;

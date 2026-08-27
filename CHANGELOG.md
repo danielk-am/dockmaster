@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- Renamed to **Localhost Manager**. Every name a person reads changed: the
+  brand header, navigation and assistant labels, page copy, the window title,
+  the in-app AI prompts, the README, and the package name. Nothing a machine
+  reads changed. The launchd label stays `am.danielk.dockmaster`, the
+  `DOCKMASTER_*` environment variables keep their names, the log directory
+  stays `~/.local/state/dockmaster`, the privileged worker stays under
+  `/Library/Application Support/Dockmaster`, and the remote provider on the
+  target host keeps its `dockmaster-provider` identity, its sudoers file, and
+  its `dockmaster-managed.yaml` Traefik route file. Renaming any of those
+  orphans a live install or a live route on a second machine, so they are
+  deliberately left for a separate migration.
+
 - Launchd agents can now be **created and removed**, not only managed. Every
   other verb was already here (start, stop, enable, disable, kickstart, log
   tail, plist view and edit), so a new service still meant hand-writing XML

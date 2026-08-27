@@ -55,7 +55,7 @@ restore_queue() {
 	fi
 }
 
-# Atomically hand one queue generation to the root process. If Dockmaster
+# Atomically hand one queue generation to the root process. If Localhost Manager
 # writes a replacement while this copy is applying, that new file remains
 # untouched and launchd wakes the helper again.
 CLAIMED=

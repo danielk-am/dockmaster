@@ -8,12 +8,12 @@ const css = await readFile(new URL('../src/style.css', import.meta.url), 'utf8')
 const html = await readFile(new URL('../index.html', import.meta.url), 'utf8');
 const uiPlay = JSON.parse(await readFile(new URL('../.uiplay.json', import.meta.url), 'utf8'));
 
-assert.match(source, /Ask Dockmaster[\s\S]*Help &amp; Feedback[\s\S]*App settings/);
+assert.match(source, /Ask Localhost Manager[\s\S]*Help &amp; Feedback[\s\S]*App settings/);
 assert.match(source, /Quick Start/);
 assert.match(source, />01<[\s\S]*>02<[\s\S]*>03</);
 assert.match(source, /prefers-reduced-motion: reduce/);
 assert.match(source, /function ThemeSwitch[\s\S]*?type="button"[\s\S]*?aria-pressed=\{pref === t\}/);
-assert.match(source, /Go to Dockmaster overview/);
+assert.match(source, /Go to Localhost Manager overview/);
 assert.match(source, /import \{ AiChatResizeHandle, PopoverSelect \} from '@1dr0\/ai-chat'/);
 assert.match(source, /<AiChatResizeHandle[\s\S]*min=\{SIDEBAR_WIDTH_MIN\}[\s\S]*max=\{SIDEBAR_WIDTH_MAX\}[\s\S]*edge="right"/);
 assert.match(source, /left-panel-resize-handle/);
@@ -76,4 +76,4 @@ assert.deepEqual(
   { min: 320, max: 560, default: 400, step: 16 },
 );
 
-console.log('Dockmaster family shell contract passed.');
+console.log('Localhost Manager family shell contract passed.');

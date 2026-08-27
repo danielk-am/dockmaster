@@ -33,7 +33,7 @@ fi
 
 if ! id "$provider_user" >/dev/null 2>&1; then
   useradd --system --create-home --home-dir "$provider_home" --shell /bin/sh \
-    --comment "Dockmaster forced-command provider" "$provider_user"
+    --comment "Localhost Manager forced-command provider" "$provider_user"
 fi
 usermod --lock "$provider_user"
 if id -nG "$provider_user" | tr ' ' '\n' | grep -Fx docker >/dev/null 2>&1; then

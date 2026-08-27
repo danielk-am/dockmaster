@@ -1,4 +1,4 @@
-# Dockmaster
+# Localhost Manager
 
 The local dev infrastructure control plane for one Mac: every listening
 port and who owns it, every local domain and what it *actually* resolves
@@ -14,7 +14,7 @@ collisions — and can fix them — beats re-deriving them in a terminal every
 time.
 
 The footer's Local operator row is now the shared editable profile control.
-Display name and avatar choices persist only in Dockmaster's browser scope;
+Display name and avatar choices persist only in Localhost Manager's browser scope;
 they do not change macOS, launchd, Docker, DNS, or privileged operator identity.
 The row fills the footer and opens `/profile` as ordinary page content, not a
 modal, dialog, drawer, or popover.
@@ -60,7 +60,7 @@ modal, dialog, drawer, or popover.
   *Browser* verdict, and one button exempts every registered suffix on every
   network service. The bypass list works by suffix, the same unit as the TLD
   registry, so one entry covers every site under a TLD including ones added
-  later. Dockmaster only adds entries; a suffix's entry is retired only when
+  later. Localhost Manager only adds entries; a suffix's entry is retired only when
   that TLD is deregistered, and nothing another tool put in the list is
   touched.
 - **Vanity TLDs** — the suffixes the ingress serves beside `.test`. `.test`
@@ -122,7 +122,7 @@ before changing `/etc/hosts`, dnsmasq, or `/etc/resolver`. The manual
 `apply-dns.sh` and `apply-edits.sh` commands remain available as a fallback.
 
 Proxy bypass is the exception that needs none of this: `networksetup` accepts
-proxy writes from an admin account, so Dockmaster performs them directly and
+proxy writes from an admin account, so Localhost Manager performs them directly and
 reads the result back before reporting success. A network service that refuses
 the direct write is queued as a `proxy-bypass-set` edit on the same
 `observed-edits.json` queue, so the fallback path needs no new watch path and
@@ -154,33 +154,33 @@ style and shell declaration.
 
 ## Family shell
 
-The app mark is Dockmaster's distinct Gravatar identicon from
+The app mark is Localhost Manager's distinct Gravatar identicon from
 `@1dr0/wpds-identity`. It is generated from a stable non-secret seed and bundled
 as a PNG, so there is no external logo request at runtime. The package also
 provides the local-operator avatar fallback.
 
-Dockmaster uses the Shared Waypoint 1.1.0 WPDS shell: near-white surfaces,
+Localhost Manager uses the Shared Waypoint 1.1.0 WPDS shell: near-white surfaces,
 a 72px route topbar, a 304px default sidebar that resizes from 240–400px,
 and a persistent 72px icon rail when collapsed. The fixed identity header and
 local-profile footer frame one scrollable sidebar body. Full-height resize
 rails straddle the sidebar and assistant dividers. Main navigation appears
-before the utility stack, followed by **Ask Dockmaster**, **Help & Feedback**,
+before the utility stack, followed by **Ask Localhost Manager**, **Help & Feedback**,
 **App settings**, the AI tip, and Insights. Active navigation uses a quiet
 tint and border, never a left stripe.
 
 Authored dropdowns use the shared WPDS `PopoverSelect`; native select menus
 are not part of the application interface.
 
-The footer keeps local profile context, appearance, and app version together. README remains repository documentation and is not rendered as a web link because the loopback host does not serve repository Markdown. Dockmaster has a private loopback service API for its own interface, but it does not claim a public API Reference or MCP server, so the shell does not fabricate those documentation links.
+The footer keeps local profile context, appearance, and app version together. README remains repository documentation and is not rendered as a web link because the loopback host does not serve repository Markdown. Localhost Manager has a private loopback service API for its own interface, but it does not claim a public API Reference or MCP server, so the shell does not fabricate those documentation links.
 
 ## Ask AI and host boundary
 
-Dockmaster includes the shared `@1dr0/ai-chat` panel. It receives a redacted,
+Localhost Manager includes the shared `@1dr0/ai-chat` panel. It receives a redacted,
 bounded snapshot of the current section and can navigate between sections. It
 has no infrastructure mutation tools.
 
 Direct Anthropic keys stay in page memory. To offer all three a8c bridges
-through Dockmaster's same-origin relay, start the server with:
+through Localhost Manager's same-origin relay, start the server with:
 
 ```sh
 AI_CHAT_CLIENT_ID=host-a8c \
@@ -209,4 +209,4 @@ The vendored package is refreshed from UI Playground with
 `npm pack --workspace @1dr0/ai-chat`, then installed from
 `vendor/1dr0-ai-chat-0.7.2.tgz`.
 
-Dockmaster has no account system. Its loopback server is the owner boundary and resolves the fixed same-origin bridge configuration. Browser requests cannot choose an upstream or assert owner status. A shared or non-owner host must add real authentication and per-user provider credentials before enabling an assistant route. The panel receives a bounded, redacted snapshot and has no infrastructure mutation, raw shell, repository, or unrestricted terminal tools.
+Localhost Manager has no account system. Its loopback server is the owner boundary and resolves the fixed same-origin bridge configuration. Browser requests cannot choose an upstream or assert owner status. A shared or non-owner host must add real authentication and per-user provider credentials before enabling an assistant route. The panel receives a bounded, redacted snapshot and has no infrastructure mutation, raw shell, repository, or unrestricted terminal tools.

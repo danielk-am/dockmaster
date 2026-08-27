@@ -1,4 +1,4 @@
-// Dockmaster — the app shell (composing-app-shells: brand header, nav,
+// Localhost Manager — the app shell (composing-app-shells: brand header, nav,
 // version footer) around the views + management of local dev infra.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Notice, SnackbarList, Spinner, __experimentalText as Text } from '@wordpress/components';
@@ -27,7 +27,7 @@ import ConversationalField from './ConversationalField.jsx';
 import { apiGet } from './api.mjs';
 
 const VERSION = '2.16.0';
-const DOCKMASTER_MARK = generatedIdentityImage('mark', 'Dockmaster');
+const DOCKMASTER_MARK = generatedIdentityImage('mark', 'Localhost Manager');
 
 const NAV = [
   { id: 'overview', label: 'Overview' },
@@ -51,8 +51,8 @@ const PAGE_META = {
   remote: { eyebrow: 'Remote infrastructure', title: 'Remote services' },
   dns: { eyebrow: 'Name resolution', title: 'DNS chain' },
   activity: { eyebrow: 'Operations', title: 'Activity' },
-  help: { eyebrow: 'Dockmaster', title: 'Help & Feedback' },
-  settings: { eyebrow: 'Dockmaster', title: 'App settings' },
+  help: { eyebrow: 'Localhost Manager', title: 'Help & Feedback' },
+  settings: { eyebrow: 'Localhost Manager', title: 'App settings' },
   profile: { eyebrow: 'Profile settings', title: 'Profile' },
 };
 
@@ -60,7 +60,7 @@ const OVERVIEW_HEROES = [
   {
     kicker: 'SEE THE WHOLE LOCAL PATH',
     title: 'Know which service owns an address before you change anything.',
-    support: 'Dockmaster connects local domains, ports, launchd services, and DNS into one inspectable path.',
+    support: 'Localhost Manager connects local domains, ports, launchd services, and DNS into one inspectable path.',
   },
   {
     kicker: 'WORK FROM EVIDENCE',
@@ -116,8 +116,8 @@ function ProfilePage({ onDone }) {
     return mountEditableProfilePage(host.current, {
       appId: 'dockmaster',
       profile: { displayName: 'Local operator', secondary: 'Local infrastructure' },
-      title: 'Dockmaster profile',
-      description: 'Choose the local identity shown in Dockmaster.',
+      title: 'Localhost Manager profile',
+      description: 'Choose the local identity shown in Localhost Manager.',
       onCancel: onDone,
       onSaved: onDone,
     }).destroy;
@@ -197,7 +197,7 @@ const Chip = ({ tone = 'neutral', children }) => <span className={`ps-chip ps-ch
 // where the sort key isn't readable (Services sorts state by number).
 const AI_FRAME = [
   'You are helping me understand my local development machine (a Mac).',
-  'I run a dashboard called Dockmaster over it: listening ports, the local domains this machine declares (in /etc/hosts, dnsmasq, and /etc/resolver files), a root Caddy ingress that serves *.test over HTTPS to local ports, launchd agents, and the DNS resolution chain.',
+  'I run a dashboard called Localhost Manager over it: listening ports, the local domains this machine declares (in /etc/hosts, dnsmasq, and /etc/resolver files), a root Caddy ingress that serves *.test over HTTPS to local ports, launchd agents, and the DNS resolution chain.',
 ].join(' ');
 
 const aiLabel = (field) => field.label || field.id.charAt(0).toUpperCase() + field.id.slice(1);
@@ -537,7 +537,7 @@ function agentSpecFromDraft(draft) {
     environment: Object.keys(env).length ? env : undefined,
     keepAlive: draft.keepAlive,
     runAtLoad: draft.runAtLoad,
-    comment: 'Created with Dockmaster.',
+    comment: 'Created with Localhost Manager.',
   };
 }
 
@@ -653,13 +653,13 @@ const TLD_FIELDS = [
 // What each table holds, in the words the prompt uses — shared by the row
 // action and the section button so both frame the data the same way.
 const AI_WHAT = {
-  domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD; a domain can be linked to the launchd agent that serves its upstream, which Dockmaster can start and stop)',
+  domains: 'the domains registered with my local ingress (each one is a user-owned Caddy site block with an mkcert certificate, reverse-proxying HTTPS to a port on 127.0.0.1; the suffix is .test or a registered vanity TLD; a domain can be linked to the launchd agent that serves its upstream, which Localhost Manager can start and stop)',
   docker: 'the running Docker containers with published host TCP ports that responded to an HTTP or HTTPS probe, making them candidates for the local Caddy ingress',
   observed: 'the full list of local domain names this machine declares anywhere — /etc/hosts, dnsmasq rules, and /etc/resolver files — alongside what the system resolver and dnsmasq each answer, and which processes are listening on the address it resolves to',
   tlds: 'the top-level suffixes my local ingress will serve — .test (the builtin, RFC-reserved default) plus any vanity TLDs I have registered; each vanity TLD is an /etc/resolver/<tld> file routing the whole suffix to the local resolver, under which individual sites are registered',
   ports: 'the TCP ports currently being listened on by this machine',
   services: 'the launchd agents I own on this machine, including disabled ones (their plist is parked under a .disabled suffix so login skips them)',
-  remote: 'the explicitly allowlisted Docker Compose services on dk-sin1 returned by Dockmaster through its forced-command SSH provider',
+  remote: 'the explicitly allowlisted Docker Compose services on dk-sin1 returned by Localhost Manager through its forced-command SSH provider',
   dns: 'the scoped DNS resolvers configured in /etc/resolver, which send matching domains to a specific nameserver instead of the default upstream',
 };
 
@@ -683,7 +683,7 @@ async function machineSnapshot() {
   ]);
   const mine = services.filter((j) => j.owned);
   return aiPrompt({
-    subject: 'Below is a full snapshot of the machine, taken from every view in Dockmaster.',
+    subject: 'Below is a full snapshot of the machine, taken from every view in Localhost Manager.',
     body: [
       '## Summary',
       `Listening ports: ${overview.counts.ports}${overview.counts.sharedPorts ? ` (${overview.counts.sharedPorts} shared between processes)` : ''}`,
@@ -782,8 +782,8 @@ function Overview({ go }) {
 function HelpPage() {
   return (
     <Section title="Help & Feedback">
-      <p>Start on Overview, choose the task that matches the symptom, then follow the linked inspection pages. Dockmaster keeps observation separate from user-owned and privileged changes. Repository setup, recovery, and operating notes live in README.md.</p>
-      <p className="ps-hint">This loopback app has no public feedback service. Record product feedback in the repository you used to start Dockmaster.</p>
+      <p>Start on Overview, choose the task that matches the symptom, then follow the linked inspection pages. Localhost Manager keeps observation separate from user-owned and privileged changes. Repository setup, recovery, and operating notes live in README.md.</p>
+      <p className="ps-hint">This loopback app has no public feedback service. Record product feedback in the repository you used to start Localhost Manager.</p>
     </Section>
   );
 }
@@ -793,8 +793,8 @@ function SettingsPage({ themePref, onThemeChange }) {
     <Section title="App settings">
       <div className="ps-settings-group">
         <ConversationalField
-          label="How should Dockmaster look?"
-          description="Follow your Mac automatically, or keep this local dashboard light or dark. This changes Dockmaster only."
+          label="How should Localhost Manager look?"
+          description="Follow your Mac automatically, or keep this local dashboard light or dark. This changes Localhost Manager only."
         >
           <ThemeSwitch pref={themePref} onChange={onThemeChange} />
         </ConversationalField>
@@ -1068,22 +1068,22 @@ function Ingress() {
     stagedEdits.length ? `Staged edits to privileged files: ${stagedEdits.map(describeEdit).join('; ')}` : 'Staged edits to privileged files: none',
   ].join('\n');
   const registeredBlock = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.domains}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.domains}.`,
     body: `${ingressState}\n\n${aiTable(DOMAIN_FIELDS, data.domains)}`,
     question: AI_SECTION_QUESTION,
   });
   const dockerBlock = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.docker}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.docker}.`,
     body: aiTable(DOCKER_FIELDS, dockerRows),
     question: AI_SECTION_QUESTION,
   });
   const observedBlock = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.observed}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.observed}.`,
     body: `${ingressState}\n\n${aiTable(observedFields, observed.data || [])}`,
     question: AI_SECTION_QUESTION,
   });
   const wholeScreen = () => aiPrompt({
-    subject: 'Below is the whole "Ingress & Domains" view from Dockmaster: Docker web services discovered from published ports, domains registered with my local ingress, and every local domain name this machine declares.',
+    subject: 'Below is the whole "Ingress & Domains" view from Localhost Manager: Docker web services discovered from published ports, domains registered with my local ingress, and every local domain name this machine declares.',
     body: [
       ingressState,
       '',
@@ -1177,7 +1177,7 @@ function Ingress() {
       <div className="ps-conversation-form">
         <ConversationalField
           label="What local address should open this service?"
-          description="Use a short name. Dockmaster adds the selected local suffix and creates the HTTPS route."
+          description="Use a short name. Localhost Manager adds the selected local suffix and creates the HTTPS route."
         >
           <div className="ps-suffixfield">
           <input
@@ -1214,7 +1214,7 @@ function Ingress() {
         </details>
         <ConversationalField
           label="Which port is the service listening on?"
-          description="Dockmaster sends requests for this address to the service on 127.0.0.1 at this port."
+          description="Localhost Manager sends requests for this address to the service on 127.0.0.1 at this port."
         >
           <input
             className="ps-search ps-portinput"
@@ -1266,7 +1266,7 @@ function Ingress() {
       )}
       {docker.data?.available && (
         <Text className="ps-hint">
-          Dockmaster asks Docker for running containers, then probes published TCP ports. Database ports and internal-only containers stay out of this list. “All interfaces” means the service is exposed beyond localhost even before ingress.
+          Localhost Manager asks Docker for running containers, then probes published TCP ports. Database ports and internal-only containers stay out of this list. “All interfaces” means the service is exposed beyond localhost even before ingress.
         </Text>
       )}
       <div className="ps-subhead-row">
@@ -1371,7 +1371,7 @@ function Ingress() {
           <p className="ps-field-context"><strong>{svcEdit.host}</strong> is the address being linked.</p>
           <ConversationalField
             label="Which launchd service starts this site?"
-            description="Dockmaster uses this link to show service health and offer the correct start or stop action beside the domain."
+            description="Localhost Manager uses this link to show service health and offer the correct start or stop action beside the domain."
           >
             <PopoverSelect
               className="ps-suffix-select"
@@ -1503,7 +1503,7 @@ function Ingress() {
           exist, so it answers before the hosts file or any resolver is consulted. The bypass list is the exemption and
           it works by suffix, so one entry per registered TLD covers every site under it, including ones added later.
           {proxy.pac && ' An auto-config file is also in play; it can route a name even when the bypass list exempts it.'}
-          {' '}Dockmaster only adds entries here. Nothing another tool put in the list is removed, and a suffix’s entry
+          {' '}Localhost Manager only adds entries here. Nothing another tool put in the list is removed, and a suffix’s entry
           is retired only when you deregister that TLD.
         </Text>
       </div>
@@ -1620,7 +1620,7 @@ function Activity() {
   const { data, error, reload } = useApi('activity');
   const ready = data?.retentionDays === 30 && data?.workerVersion === 2;
   const sectionPrompt = () => aiPrompt({
-    subject: 'Below is Dockmaster’s auto-apply activity log. It records validated DNS, hosts, and resolver queue processing by the root worker.',
+    subject: 'Below is Localhost Manager’s auto-apply activity log. It records validated DNS, hosts, and resolver queue processing by the root worker.',
     body: [
       `Worker version: ${data?.workerVersion || 'not installed'}`,
       `Retention: ${data?.retentionDays ? `${data.retentionDays} days` : 'not configured'}`,
@@ -1744,7 +1744,7 @@ function Tlds() {
   const resolverEdits = (staged.data?.edits || []).filter((e) => e.kind === 'resolver-write' || e.kind === 'resolver-del');
   const describeEdit = (e) => (e.kind === 'resolver-write' ? `resolver: write /etc/resolver/${e.file}` : `resolver: remove /etc/resolver/${e.file}`);
   const sectionPrompt = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.tlds}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.tlds}.`,
     body: aiTable(TLD_FIELDS, data.tlds),
     question: AI_SECTION_QUESTION,
   });
@@ -1797,7 +1797,7 @@ function Tlds() {
       <div className="ps-conversation-form">
         <ConversationalField
           label="Which vanity suffix should this Mac resolve?"
-          description="Dockmaster registers this suffix and prepares its resolver file. Use .test when a custom local namespace is not required."
+          description="Localhost Manager registers this suffix and prepares its resolver file. Use .test when a custom local namespace is not required."
         >
           <div className="ps-suffixfield">
             <span>.</span>
@@ -1860,7 +1860,7 @@ function Ports() {
     { id: 'kill', label: 'Stop process (SIGTERM)', isDestructive: true, callback: ([item]) => kill(item), isEligible: (item) => !!item.pid && item.user && item.user !== 'root' },
   ];
   const sectionPrompt = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.ports}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.ports}.`,
     body: `A "shared port" means two processes hold the same port on different addresses — a wildcard bind beside a specific one.\n\n${aiTable(PORT_FIELDS, rows)}`,
     question: AI_SECTION_QUESTION,
   });
@@ -1985,7 +1985,7 @@ function Services() {
     { id: 'remove', label: 'Remove', isDestructive: true, callback: ([item]) => setConfirmRemove(item.label), isEligible: (item) => item.domain === 'user' },
   ];
   const sectionPrompt = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.services}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.services}.`,
     body: aiTable(SERVICE_FIELDS, rows),
     question: AI_SECTION_QUESTION,
   });
@@ -2013,7 +2013,7 @@ function Services() {
         <div className="ps-conversation-form">
           <ConversationalField
             label="What should this agent be called?"
-            description="Labels must start with am.danielk., com.danielkam. or dev.1dr0. Dockmaster only manages agents it owns."
+            description="Labels must start with am.danielk., com.danielkam. or dev.1dr0. Localhost Manager only manages agents it owns."
           >
             <input
               aria-label="Label"
@@ -2176,7 +2176,7 @@ function RemoteServices() {
     { id: 'pull', label: 'Pull image', callback: ([item]) => lifecycle(item, 'pull'), isEligible: (item) => item.actions.includes('pull') },
   ];
   const sectionPrompt = () => aiPrompt({
-    subject: `Below, from Dockmaster: ${AI_WHAT.remote}.`,
+    subject: `Below, from Localhost Manager: ${AI_WHAT.remote}.`,
     body: aiTable(REMOTE_SERVICE_FIELDS, rows),
     question: AI_SECTION_QUESTION,
   });
@@ -2206,7 +2206,7 @@ function RemoteServices() {
         aiWhat={AI_WHAT.remote}
         aiQuestion={AI_ROW_QUESTION.remote}
       />
-      <Text className="ps-hint">Services are read-only unless their manifest and the local Dockmaster allowlist both grant a specific action. Coolify-managed projects are excluded.</Text>
+      <Text className="ps-hint">Services are read-only unless their manifest and the local Localhost Manager allowlist both grant a specific action. Coolify-managed projects are excluded.</Text>
       <div className="ps-log">
         <div className="ps-log__head"><span>Provider audit</span></div>
         <pre>{audit.error ? 'Audit unavailable.' : auditLines.join('\n') || '(no lifecycle actions recorded)'}</pre>
@@ -2226,7 +2226,7 @@ function Dns() {
     'Order of authority: browser secure-DNS (if on) → NextDNS (if running) → the scoped resolvers below → default upstream.',
   ].join('\n');
   const sectionPrompt = () => aiPrompt({
-    subject: `Below, from Dockmaster: the DNS chain on this machine, and ${AI_WHAT.dns}.`,
+    subject: `Below, from Localhost Manager: the DNS chain on this machine, and ${AI_WHAT.dns}.`,
     body: `${chainState}\n\n${aiTable(DNS_FIELDS, data.scoped)}`,
     question: AI_SECTION_QUESTION,
   });
@@ -2350,7 +2350,7 @@ export default function App() {
       <button className="ps-sidebar-backdrop" type="button" aria-label="Close navigation" onClick={() => setMobileNavOpen(false)} />
       <aside
         className="ps-sidebar"
-        aria-label="Dockmaster navigation"
+        aria-label="Localhost Manager navigation"
         aria-hidden={isNarrow && !mobileNavOpen ? 'true' : undefined}
         {...(isNarrow && !mobileNavOpen ? { inert: '' } : {})}
       >
@@ -2362,7 +2362,7 @@ export default function App() {
           onValueChange={setSidebarWidth}
           step={16}
           edge="right"
-          label="Resize Dockmaster sidebar"
+          label="Resize Localhost Manager sidebar"
         />
         <header className="ps-sidebar__header">
           <Button
@@ -2372,9 +2372,9 @@ export default function App() {
             showTooltip
             onClick={() => isNarrow ? setMobileNavOpen(false) : setSidebarCollapsed(!sidebarCollapsed)}
           />
-          <a href="/" className="ps-brand" aria-label="Go to Dockmaster overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
+          <a href="/" className="ps-brand" aria-label="Go to Localhost Manager overview" onClick={(event) => { event.preventDefault(); navigate('overview'); }}>
             <img className="ps-brand__mark wpds-identity-image is-mark" src={DOCKMASTER_MARK} alt="" />
-            <span className="ps-brand__copy"><strong>Dockmaster</strong><span className="ps-brand__sub">local dev infrastructure</span></span>
+            <span className="ps-brand__copy"><strong>Localhost Manager</strong><span className="ps-brand__sub">local dev infrastructure</span></span>
           </a>
         </header>
         <div className="ps-sidebar__body">
@@ -2385,7 +2385,7 @@ export default function App() {
             ))}
           </nav>
           <div className="ps-sidebar__utilities">
-            <Button className="ps-utility ps-utility--ask" icon={commentContent} isPressed={assistantOpen} onClick={() => { setAssistantOpen((open) => !open); setMobileNavOpen(false); }}><span className="ps-utility__label">Ask Dockmaster</span></Button>
+            <Button className="ps-utility ps-utility--ask" icon={commentContent} isPressed={assistantOpen} onClick={() => { setAssistantOpen((open) => !open); setMobileNavOpen(false); }}><span className="ps-utility__label">Ask Localhost Manager</span></Button>
             <Button className={`ps-utility${page === 'help' ? ' is-active' : ''}`} icon={help} onClick={() => navigate('help')}><span className="ps-utility__label">Help &amp; Feedback</span></Button>
             <Button className={`ps-utility${page === 'settings' ? ' is-active' : ''}`} icon={cog} onClick={() => navigate('settings')}><span className="ps-utility__label">App settings</span></Button>
           </div>
@@ -2398,13 +2398,13 @@ export default function App() {
           )}
           <details className="ps-insights">
             <summary>Control boundary</summary>
-            <p>Dockmaster separates read-only inspection, user-owned controls, and privileged system changes.</p>
+            <p>Localhost Manager separates read-only inspection, user-owned controls, and privileged system changes.</p>
           </details>
         </div>
         <footer className="ps-sidebar__footer">
           <FooterProfile onOpen={openProfile} />
           <AppearanceShortcut pref={themePref} onOpen={() => navigate('settings')} />
-          <div className="ps-app-meta"><strong>Dockmaster</strong><span>Version {VERSION}</span></div>
+          <div className="ps-app-meta"><strong>Localhost Manager</strong><span>Version {VERSION}</span></div>
         </footer>
       </aside>
       <div className="ps-main-column">
@@ -2422,7 +2422,7 @@ export default function App() {
       </div>
       {assistantOpen && (
         <>
-          <button className="ps-assistant-backdrop" type="button" aria-label="Close Dockmaster Assistant" onClick={() => setAssistantOpen(false)} />
+          <button className="ps-assistant-backdrop" type="button" aria-label="Close Localhost Manager Assistant" onClick={() => setAssistantOpen(false)} />
           <AssistantPanel
             page={page}
             appearance={themePref}

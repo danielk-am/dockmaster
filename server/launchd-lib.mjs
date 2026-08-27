@@ -1,6 +1,6 @@
 // Building and validating a new launchd user agent.
 //
-// Dockmaster could already list, start, stop, enable, disable, kickstart and
+// Localhost Manager could already list, start, stop, enable, disable, kickstart and
 // edit agents. What it could not do was create one, so every new service still
 // meant hand-writing XML into ~/Library/LaunchAgents. This is that missing half.
 //
@@ -10,7 +10,7 @@
 import path from 'node:path';
 
 // Same ownership rule the lifecycle routes enforce. Creating an agent outside
-// this namespace would let Dockmaster write plists it then refuses to manage.
+// this namespace would let Localhost Manager write plists it then refuses to manage.
 export const OWNED_LABEL = /^(am\.danielk\.|com\.danielkam\.|dev\.1dr0\.)[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
 const XML_ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&apos;' };
