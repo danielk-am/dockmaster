@@ -90,7 +90,7 @@ body {
 	border-right: 1px solid var(--ps-border);
 	position: relative;
 }
-.ps-sidebar__resize.a8c-ai-chat__resize-handle {
+.ps-sidebar__resize.wpds-ai-chat__resize-handle {
 	left: auto;
 	top: 0;
 	bottom: 0;
@@ -102,17 +102,17 @@ body {
 	z-index: 12;
 	background: transparent;
 }
-.ps-sidebar__resize.a8c-ai-chat__resize-handle::before,
-.ps-assistant__resize.a8c-ai-chat__resize-handle::before {
+.ps-sidebar__resize.wpds-ai-chat__resize-handle::before,
+.ps-assistant__resize.wpds-ai-chat__resize-handle::before {
 	width: 4px; height: 32px; border-radius: 999px; background: var(--ps-accent);
 	opacity: 0; transition: opacity 120ms ease;
 }
-.ps-sidebar__resize.a8c-ai-chat__resize-handle:hover::before,
-.ps-sidebar__resize.a8c-ai-chat__resize-handle:focus-visible::before,
-.ps-sidebar__resize.a8c-ai-chat__resize-handle.is-dragging::before,
-.ps-assistant__resize.a8c-ai-chat__resize-handle:hover::before,
-.ps-assistant__resize.a8c-ai-chat__resize-handle:focus-visible::before,
-.ps-assistant__resize.a8c-ai-chat__resize-handle.is-dragging::before { opacity: 1; }
+.ps-sidebar__resize.wpds-ai-chat__resize-handle:hover::before,
+.ps-sidebar__resize.wpds-ai-chat__resize-handle:focus-visible::before,
+.ps-sidebar__resize.wpds-ai-chat__resize-handle.is-dragging::before,
+.ps-assistant__resize.wpds-ai-chat__resize-handle:hover::before,
+.ps-assistant__resize.wpds-ai-chat__resize-handle:focus-visible::before,
+.ps-assistant__resize.wpds-ai-chat__resize-handle.is-dragging::before { opacity: 1; }
 .ps-app.is-sidebar-collapsed .ps-sidebar__resize { display: none; }
 
 .ps-sidebar__header {
@@ -282,12 +282,12 @@ body {
 	background: var(--ps-surface);
 	border-left: 1px solid var(--ps-border);
 }
-.ps-assistant__resize.a8c-ai-chat__resize-handle {
+.ps-assistant__resize.wpds-ai-chat__resize-handle {
 	left: -1px; right: auto; top: 0; bottom: 0; transform: none; height: auto; width: 16px; justify-content: flex-start; z-index: 4; background: transparent;
 }
-.ps-assistant__resize.a8c-ai-chat__resize-handle::before { margin-left: 8px; }
+.ps-assistant__resize.wpds-ai-chat__resize-handle::before { margin-left: 8px; }
 .ps-assistant { width: 100%; min-width: 0; min-height: 0; display: flex; }
-.ps-assistant.a8c-ai-chat {
+.ps-assistant.wpds-ai-chat {
 	height: 100%;
 	border-top: 0;
 	border-right: 0;
@@ -526,8 +526,8 @@ body {
 		display: block; position: fixed; inset: 0; z-index: 59; border: 0;
 		background: rgba(0, 0, 0, 0.34);
 	}
-	.ps-sidebar__resize.a8c-ai-chat__resize-handle,
-	.ps-assistant__resize.a8c-ai-chat__resize-handle { display: none; }
+	.ps-sidebar__resize.wpds-ai-chat__resize-handle,
+	.ps-assistant__resize.wpds-ai-chat__resize-handle { display: none; }
 	.ps-app.is-sidebar-collapsed .ps-sidebar__header { min-height: 72px; }
 	.ps-app.is-sidebar-collapsed .ps-brand { min-height: 71px; justify-content: flex-start; padding: 14px 48px 14px 16px; }
 	.ps-app.is-sidebar-collapsed .ps-brand__copy,
