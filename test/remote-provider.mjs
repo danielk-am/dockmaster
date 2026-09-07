@@ -162,6 +162,8 @@ assert.deepEqual(calls[0].args, [
   '-o', 'ForwardAgent=no',
   '-o', 'PermitLocalCommand=no',
   '-o', 'ConnectTimeout=5',
+  '-o', 'IdentitiesOnly=yes',
+  '-o', 'IdentityAgent=none',
   '-i', '/var/lib/dockmaster/keys/provider',
   '-l', 'dockmaster-provider',
   '--', 'provider.example',

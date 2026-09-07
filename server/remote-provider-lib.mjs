@@ -214,6 +214,8 @@ const sshArgs = (request, config) => {
     '-o', 'ForwardAgent=no',
     '-o', 'PermitLocalCommand=no',
     '-o', `ConnectTimeout=${CONNECT_TIMEOUT_SECONDS}`,
+    '-o', 'IdentitiesOnly=yes',
+    '-o', 'IdentityAgent=none',
     '-i', config.identityFile,
     '-l', config.user,
     '--', config.host,
