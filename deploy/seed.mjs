@@ -4,7 +4,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { CERTS, MKCERT, ensureDirs, readRegistry, regenerate, writeRegistry } from '../server/ingress-lib.mjs';
+import { CERTS, MKCERT, ensureDirs, readRegistry, regenerate, writeRegistry, certPaths } from '../server/ingress-lib.mjs';
 
 ensureDirs();
 const reg = readRegistry();
@@ -13,9 +13,9 @@ if (!reg.domains.some((d) => d.host === 'snippets.test')) {
 	writeRegistry(reg);
 }
 for (const d of readRegistry().domains) {
-	const pem = path.join(CERTS, `${d.host}.pem`);
+	const { cert: pem, key } = certPaths(d.host);
 	if (!fs.existsSync(pem)) {
-		execFileSync(MKCERT, ['-cert-file', pem, '-key-file', path.join(CERTS, `${d.host}-key.pem`), d.host], {
+		execFileSync(MKCERT, ['-cert-file', pem, '-key-file', key, d.host], {
 			stdio: 'inherit',
 		});
 	}

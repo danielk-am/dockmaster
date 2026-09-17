@@ -43,7 +43,18 @@ assert.match(css, /\.ps-sidebar__resize\.wpds-ai-chat__resize-handle[\s\S]*justi
 assert.match(css, /\.ps-assistant__resize\.wpds-ai-chat__resize-handle[\s\S]*left:\s*-1px[\s\S]*justify-content:\s*flex-start/);
 assert.match(css, /\.ps-assistant__resize\.wpds-ai-chat__resize-handle::before\s*\{[^}]*margin-left:\s*8px/);
 assert.match(css, /\.ps-overview__hero[\s\S]*border-radius:\s*18px/);
-assert.match(css, /\.ps-app\.is-sidebar-collapsed[\s\S]*--ps-sidebar-current:\s*72px/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed\s*\{\s*--ps-sidebar-current:\s*0px/);
+assert.doesNotMatch(css, /--ps-sidebar-current:\s*72px/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-sidebar\s*\{[^}]*overflow:\s*hidden/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-sidebar > \*\s*\{\s*visibility:\s*hidden/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-sidebar-collapse\.components-button\s*\{[^}]*position:\s*fixed[^}]*visibility:\s*visible/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-sidebar-collapse\.components-button svg\s*\{\s*transform:\s*scaleX\(-1\)/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-topbar\s*\{\s*padding-left:\s*60px/);
+assert.match(css, /\.ps-app\.is-sidebar-collapsed \.ps-main\s*\{\s*padding-left:\s*68px/);
+assert.match(css, /\.ps-sidebar__header\s*\{[^}]*min-height:\s*56px/);
+assert.match(css, /\.ps-main-column\s*\{[^}]*grid-template-rows:\s*56px/);
+assert.match(css, /\.ps-assistant-fab\.components-button\s*\{[^}]*position:\s*fixed/);
+assert.match(source, /!assistantOpen &&[\s\S]*ps-assistant-fab/);
 assert.match(css, /\.ps-local-profile\s*\{[^}]*width:\s*100%/);
 assert.match(css, /@media \(max-width: 760px\)[\s\S]*transform:\s*translateX\(-105%\)/);
 assert.doesNotMatch(css, /\.ps-nav button[^}]*border-left/);
@@ -64,7 +75,7 @@ assert.doesNotMatch(source, /function AppearanceControl/);
 assert.match(css, /\.ps-conversation-form\s*\{[^}]*display:\s*grid;[^}]*width:\s*min\(760px, 100%\)/s);
 assert.match(css, /\.ps-conversational-field__control[\s\S]*?width:\s*100%/);
 
-assert.deepEqual(uiPlay.app.style, { id: 'waypoint', version: '1.1.0' });
+assert.deepEqual(uiPlay.app.style, { id: 'waypoint', version: '1.2.0' });
 assert.equal(uiPlay.shell.sidebar.resize_handle, 'component:left-panel-resize-handle');
 assert.equal(uiPlay.shell.assistant_panel.resize_handle, 'component:right-panel-resize-handle');
 assert.deepEqual(

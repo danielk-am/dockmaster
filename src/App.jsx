@@ -2367,7 +2367,7 @@ export default function App() {
         <header className="ps-sidebar__header">
           <Button
             className="ps-sidebar-collapse"
-            icon={sidebarCollapsed ? menu : chevronLeft}
+            icon={chevronLeft}
             label={isNarrow ? 'Close navigation' : sidebarCollapsed ? 'Expand sidebar' : 'Collapse sidebar'}
             showTooltip
             onClick={() => isNarrow ? setMobileNavOpen(false) : setSidebarCollapsed(!sidebarCollapsed)}
@@ -2420,6 +2420,15 @@ export default function App() {
           <Page go={navigate} themePref={themePref} onThemeChange={setThemePref} onDone={closeProfile} />
         </main>
       </div>
+      {!assistantOpen && (
+        <Button
+          className="ps-assistant-fab"
+          icon={commentContent}
+          label="Ask Localhost Manager"
+          showTooltip
+          onClick={() => { setAssistantOpen(true); setMobileNavOpen(false); }}
+        />
+      )}
       {assistantOpen && (
         <>
           <button className="ps-assistant-backdrop" type="button" aria-label="Close Localhost Manager Assistant" onClick={() => setAssistantOpen(false)} />

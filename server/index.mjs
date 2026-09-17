@@ -14,7 +14,8 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { aiChatClientConfig, createAiBridgeRegistry } from './ai-bridge-config.mjs';
-import { discoverDockerWebServices } from './docker-lib.mjs';
+import { discoverDockerWebServices, listContainers } from './docker-lib.mjs';
+import { hostsFileNames, planHostsSync, readSyncedHosts, routedHosts, writeSyncedHosts } from './wildcard-hosts-lib.mjs';
 import { buildAgentPlist, defaultLogPaths, validateAgentSpec, OWNED_LABEL } from './launchd-lib.mjs';
 import {
   bypassCovers,
@@ -46,6 +47,10 @@ import {
   resolverSeed,
   writeRegistry,
   writeTlds,
+  certPaths,
+  isWildcard,
+  validSiteName,
+  wildcardBase,
 } from './ingress-lib.mjs';
 
 const PORT = Number(process.env.PORT || 4950);
@@ -330,8 +335,9 @@ async function ingressState() {
       const agent = d.service ? agentFor(d.service) : null;
       return {
         ...d,
-        cert: existsSync(path.join(CERTS, `${d.host}.pem`)),
-        dns: await ingressDnsState(d.host),
+        cert: existsSync(certPaths(d.host).cert),
+        // A wildcard's base resolves through the same dnsmasq rule as its names.
+        dns: await ingressDnsState(wildcardBase(d.host)),
         upstream: (await tcpProbe('127.0.0.1', d.port)) ? 'up' : 'down',
         url: `https://${d.host}`,
         // 'shadowed' is the browser-only failure: everything below the
@@ -551,8 +557,8 @@ app.post('/api/ingress/domains', async (req, res) => {
   // Coolify app behind the VM's proxy, is reached over https with the cert
   // unverified. See proxyLine in ingress-lib.
   const tls = req.body?.tls === true || req.body?.tls === 'true';
-  if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(name)) {
-    return res.status(400).json({ error: `Name must be letters/digits/hyphens (the .${tld} suffix is automatic).` });
+  if (!validSiteName(name)) {
+    return res.status(400).json({ error: `Name must be letters/digits/hyphens, or *.<name> for a wildcard (the .${tld} suffix is automatic).` });
   }
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return res.status(400).json({ error: 'Upstream port must be 1–65535.' });
@@ -561,11 +567,8 @@ app.post('/api/ingress/domains', async (req, res) => {
   if (reg.domains.some((d) => d.host === host)) {
     return res.status(409).json({ error: `${host} is already registered.` });
   }
-  const mk = await run(MKCERT, [
-    '-cert-file', path.join(CERTS, `${host}.pem`),
-    '-key-file', path.join(CERTS, `${host}-key.pem`),
-    host,
-  ]);
+  const { cert, key } = certPaths(host);
+  const mk = await run(MKCERT, ['-cert-file', cert, '-key-file', key, host]);
   if (!mk.ok) return res.status(500).json({ error: `mkcert failed: ${mk.stderr.slice(0, 300)}` });
   reg.domains.push({ host, port, ...(tls ? { tls: true } : {}) });
   reg.domains.sort((a, b) => a.host.localeCompare(b.host));
@@ -592,6 +595,9 @@ app.patch('/api/ingress/domains/:host', async (req, res) => {
   if (!wantsHost && !wantsPort && !wantsService && !wantsRoutes && !wantsTls) return res.status(400).json({ error: 'Nothing to change.' });
 
   let nextHost = host;
+  if (wantsHost && isWildcard(host)) {
+    return res.status(400).json({ error: 'A wildcard entry can’t be renamed — remove it and add the new one.' });
+  }
   if (wantsHost) {
     nextHost = String(req.body.host).trim().toLowerCase();
     const splitAt = nextHost.lastIndexOf('.');
@@ -679,14 +685,63 @@ app.delete('/api/ingress/domains/:host', (req, res) => {
   if (!reg.domains.some((d) => d.host === host)) return res.status(404).json({ error: 'Not registered.' });
   reg.domains = reg.domains.filter((d) => d.host !== host);
   writeRegistry(reg);
-  for (const f of [`${host}.pem`, `${host}-key.pem`]) {
-    try { rmSync(path.join(CERTS, f)); } catch { /* already gone */ }
+  const { cert, key } = certPaths(host);
+  for (const f of [cert, key]) {
+    try { rmSync(f); } catch { /* already gone */ }
   }
   regenerate();
-  queueEdit({ id: randomUUID(), kind: 'hosts-del', name: host });
-  queueEdit({ id: randomUUID(), kind: 'dnsmasq-del', key: host });
+  // A wildcard has no hosts lines, and its dnsmasq rule is keyed on the base.
+  if (!isWildcard(host)) queueEdit({ id: randomUUID(), kind: 'hosts-del', name: host });
+  queueEdit({ id: randomUUID(), kind: 'dnsmasq-del', key: wildcardBase(host) });
   refreshDnsPending();
   res.json({ ok: true });
+});
+
+// ------------------------------------------------------- wildcard hosts ----
+// Chrome's Secure DNS honours only /etc/hosts, so every name a container's
+// Traefik router serves under a registered wildcard gets its own hosts line
+// through the root queue, and loses it once nothing routes it. An unreachable
+// engine, or one that lists no containers at all (mid-restart), changes
+// nothing.
+const HOSTS_SYNC_INTERVAL = 30_000;
+let wildcardHostsSync = { lastRun: null, ok: null, error: null, names: [], added: [], removed: [] };
+let wildcardHostsSyncing = null;
+
+const syncWildcardHosts = async () => {
+  const lastRun = new Date().toISOString();
+  const wildcards = readRegistry().domains.map((d) => d.host).filter(isWildcard);
+  let wanted = [];
+  if (wildcards.length) {
+    const containers = await listContainers();
+    if (!containers || !containers.length) {
+      const error = containers ? 'Docker listed no containers; hosts lines left as they are.' : 'Docker engine unavailable; hosts lines left as they are.';
+      wildcardHostsSync = { ...wildcardHostsSync, lastRun, ok: false, error };
+      return;
+    }
+    wanted = routedHosts(containers, wildcards);
+  }
+  let hostsText = '';
+  try { hostsText = readFileSync('/etc/hosts', 'utf8'); } catch { /* read as empty */ }
+  const plan = planHostsSync({ wanted, present: hostsFileNames(hostsText), managed: readSyncedHosts() });
+  for (const name of plan.add) queueEdit({ id: randomUUID(), kind: 'hosts-set', name, ip: ALIAS_IP });
+  for (const name of plan.remove) queueEdit({ id: randomUUID(), kind: 'hosts-del', name });
+  writeSyncedHosts(plan.managed);
+  wildcardHostsSync = { lastRun, ok: true, error: null, names: wanted, added: plan.add, removed: plan.remove };
+};
+
+const runWildcardHostsSync = () => {
+  wildcardHostsSyncing ||= syncWildcardHosts()
+    .catch((error) => {
+      wildcardHostsSync = { ...wildcardHostsSync, lastRun: new Date().toISOString(), ok: false, error: error.message };
+    })
+    .finally(() => { wildcardHostsSyncing = null; });
+  return wildcardHostsSyncing;
+};
+
+app.get('/api/ingress/wildcard-hosts', (_req, res) => res.json(wildcardHostsSync));
+app.post('/api/ingress/wildcard-hosts/sync', async (_req, res) => {
+  await runWildcardHostsSync();
+  res.json(wildcardHostsSync);
 });
 
 // ------------------------------------------------- observed-domain edits ----
@@ -1158,4 +1213,8 @@ app.post('/api/launchd/:label/enable', async (req, res) => {
 app.use(express.static(path.join(__dirname, '..', 'dist')));
 app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'dist', 'index.html')));
 
-app.listen(PORT, '127.0.0.1', () => console.log(`Localhost Manager v${appVersion} on http://127.0.0.1:${PORT}`));
+app.listen(PORT, '127.0.0.1', () => {
+  console.log(`Localhost Manager v${appVersion} on http://127.0.0.1:${PORT}`);
+  runWildcardHostsSync();
+  setInterval(runWildcardHostsSync, HOSTS_SYNC_INTERVAL);
+});

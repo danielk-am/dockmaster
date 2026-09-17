@@ -1,5 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import http from 'node:http';
 import https from 'node:https';
 
@@ -11,8 +13,16 @@ const DOCKER_CANDIDATES = [
 
 const dockerCommand = () => DOCKER_CANDIDATES.find(existsSync) || 'docker';
 
+// launchd starts this server without the shell's DOCKER_CONTEXT, and Colima
+// does not own /var/run/docker.sock, so the CLI would find no engine. Point it
+// at Colima's socket unless the environment already chose an engine.
+const COLIMA_SOCKET = path.join(os.homedir(), '.colima/default/docker.sock');
+export const dockerEnv = (env = process.env, socketExists = existsSync(COLIMA_SOCKET)) => (
+  env.DOCKER_HOST || env.DOCKER_CONTEXT || !socketExists ? env : { ...env, DOCKER_HOST: `unix://${COLIMA_SOCKET}` }
+);
+
 const runDocker = (args, timeout = 6000) => new Promise((resolve) => {
-  execFile(dockerCommand(), args, { timeout, maxBuffer: 8 * 1024 * 1024 }, (error, stdout, stderr) => {
+  execFile(dockerCommand(), args, { timeout, maxBuffer: 8 * 1024 * 1024, env: dockerEnv() }, (error, stdout, stderr) => {
     resolve({
       ok: !error,
       stdout: String(stdout || ''),
@@ -160,4 +170,21 @@ export async function discoverDockerWebServices({
     ignoredNonWebPorts: bindings.length - services.length,
     services,
   };
+}
+
+// Every container, stopped ones included, so a restart does not make its
+// labels disappear. null means the engine could not be read.
+export async function listContainers({ docker = runDocker } = {}) {
+  const listed = await docker(['ps', '-aq'], 3500);
+  if (!listed.ok) return null;
+  const ids = listed.stdout.trim().split(/\s+/).filter(Boolean);
+  if (!ids.length) return [];
+  const inspected = await docker(['inspect', ...ids], 6500);
+  if (!inspected.ok) return null;
+  try {
+    const containers = JSON.parse(inspected.stdout);
+    return Array.isArray(containers) ? containers : null;
+  } catch {
+    return null;
+  }
 }

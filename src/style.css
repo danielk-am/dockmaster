@@ -71,7 +71,7 @@ body {
 	overflow: hidden;
 	background: var(--ps-canvas);
 }
-.ps-app.is-sidebar-collapsed { --ps-sidebar-current: 72px; }
+.ps-app.is-sidebar-collapsed { --ps-sidebar-current: 0px; }
 .ps-skip-link {
 	position: fixed; top: 8px; left: 8px; z-index: 100010; transform: translateY(-160%);
 	padding: 9px 12px; border-radius: 6px; background: var(--ps-text); color: var(--ps-surface); text-decoration: none;
@@ -89,6 +89,22 @@ body {
 	background: var(--ps-surface);
 	border-right: 1px solid var(--ps-border);
 	position: relative;
+	transition: width 200ms ease, border-color 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+	.ps-sidebar { transition: none; }
+}
+/* Collapsed means GONE, not a rail: the column folds to zero width and out
+   of the layout, and its children fold away with it. The escaped toggle is
+   the one exception — see .ps-sidebar-collapse below. Desktop only: below
+   the drawer breakpoint the sidebar is a takeover, not a column. */
+@media (min-width: 761px) {
+	.ps-app.is-sidebar-collapsed .ps-sidebar {
+		border-right-width: 0;
+		min-width: 0;
+		overflow: hidden;
+	}
+	.ps-app.is-sidebar-collapsed .ps-sidebar > * { visibility: hidden; }
 }
 .ps-sidebar__resize.wpds-ai-chat__resize-handle {
 	left: auto;
@@ -117,30 +133,43 @@ body {
 
 .ps-sidebar__header {
 	position: relative;
-	min-height: 72px;
+	min-height: 56px;
 	border-bottom: 1px solid var(--ps-border);
 }
+/* The collapse toggle: a 32px ghost box around a 24px glyph, transparent at
+   rest. When the panel folds it escapes to a fixed spot over the topbar
+   (below) — the SAME control in both states, only relocated. */
 .ps-sidebar-collapse.components-button {
 	position: absolute;
-	top: 22px;
+	top: 12px;
 	right: 12px;
 	z-index: 2;
-	width: 28px;
-	min-width: 28px;
-	height: 28px;
+	width: 32px;
+	min-width: 32px;
+	height: 32px;
 	padding: 0;
 	justify-content: center;
-	border-radius: 6px;
+	border-radius: 8px;
 	color: var(--ps-muted);
 	opacity: 0.7;
+	transition: top 200ms ease, left 200ms ease, right 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+	.ps-sidebar-collapse.components-button { transition: none; }
 }
 .ps-sidebar-collapse.components-button:hover {
 	opacity: 1;
 	color: var(--ps-text);
 	background: var(--ps-hover);
 }
+/* One glyph, mirrored when collapsed, rather than swapping to a hamburger. */
+.ps-sidebar-collapse.components-button svg { transition: transform 200ms ease; }
+@media (prefers-reduced-motion: reduce) {
+	.ps-sidebar-collapse.components-button svg { transition: none; }
+}
+.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button svg { transform: scaleX(-1); }
 .ps-brand {
-	display: flex; gap: 10px; align-items: center; min-height: 71px; width: 100%; padding: 14px 48px 14px 16px;
+	display: flex; gap: 10px; align-items: center; min-height: 40px; width: 100%; padding: 8px 48px 8px 16px;
 	color: inherit; font: inherit; text-align: left; text-decoration: none;
 }
 .ps-brand:focus-visible,
@@ -231,22 +260,20 @@ body {
 .ps-app-meta { display: flex; justify-content: space-between; gap: 8px; font-size: 10px; }
 .ps-app-meta strong { color: var(--ps-text); }
 
-.ps-app.is-sidebar-collapsed .ps-sidebar__header { min-height: 104px; }
-.ps-app.is-sidebar-collapsed .ps-brand { min-height: 70px; justify-content: center; padding: 14px 18px; }
-.ps-app.is-sidebar-collapsed .ps-brand__copy,
-.ps-app.is-sidebar-collapsed .ps-sidebar__caption,
-.ps-app.is-sidebar-collapsed .ps-nav__label,
-.ps-app.is-sidebar-collapsed .ps-utility__label,
-.ps-app.is-sidebar-collapsed .ps-tip,
-.ps-app.is-sidebar-collapsed .ps-insights,
-.ps-app.is-sidebar-collapsed .ps-local-profile span,
-.ps-app.is-sidebar-collapsed .ps-appearance,
-.ps-app.is-sidebar-collapsed .ps-app-meta { display: none; }
-.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button { top: 69px; left: 22px; right: auto; }
-.ps-app.is-sidebar-collapsed .ps-sidebar__body { padding-left: 8px; padding-right: 8px; }
-.ps-app.is-sidebar-collapsed .ps-nav button,
-.ps-app.is-sidebar-collapsed .ps-sidebar__utilities .components-button { justify-content: center; padding-left: 8px; padding-right: 8px; }
-.ps-app.is-sidebar-collapsed .ps-local-profile { justify-content: center; }
+/* Collapsed (desktop): the toggle is the only reachable control, escaped
+   fixed to the topbar's leading edge — the shared page gutter — vertically
+   centred in the slim 56px bar. Nothing else in the folded column needs its
+   own rail styling any more, because nothing else in it is visible. */
+@media (min-width: 761px) {
+	.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button {
+		position: fixed;
+		top: 12px;
+		left: 24px;
+		right: auto;
+		visibility: visible;
+		z-index: 21;
+	}
+}
 
 /* System | Light | Dark segmented switcher. */
 .ps-themeswitch { display: flex; border: 1px solid var(--ps-border); border-radius: 6px; overflow: hidden; }
@@ -259,11 +286,23 @@ body {
 .ps-themeswitch button.is-active { background: var(--ps-accent); color: #fff; font-weight: 600; }
 
 .ps-main-column {
-	display: grid; grid-template-rows: 72px minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0;
+	display: grid; grid-template-rows: 56px minmax(0, 1fr); flex: 1; min-width: 0; min-height: 0;
 }
 .ps-topbar {
 	display: flex; align-items: center; justify-content: space-between; gap: 20px; min-width: 0;
 	padding: 0 28px; border-bottom: 1px solid var(--ps-border); background: var(--ps-surface);
+	transition: padding-left 200ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+	.ps-topbar { transition: none; }
+}
+/* While the sidebar is folded the toggle parks over this bar's leading
+   edge, so the title indents to clear it and the content below follows —
+   title, subtitle, and body share one left edge whichever state the
+   sidebar is in. */
+@media (min-width: 761px) {
+	.ps-app.is-sidebar-collapsed .ps-topbar { padding-left: 60px; }
+	.ps-app.is-sidebar-collapsed .ps-main { padding-left: 68px; }
 }
 .ps-topbar__title { min-width: 0; }
 .ps-topbar__title h1 { margin: 2px 0 0; overflow: hidden; color: var(--ps-text); font-size: 20px; line-height: 1.2; text-overflow: ellipsis; white-space: nowrap; }
@@ -273,7 +312,10 @@ body {
 .ps-readiness.is-ready > span { background: #00a32a; }
 .ps-readiness.is-error > span { background: #d63638; }
 .ps-mobile-menu.components-button { display: none; }
-.ps-main { min-width: 0; min-height: 0; padding: 32px 36px 56px; background: var(--ps-canvas); overflow-y: auto; }
+.ps-main { min-width: 0; min-height: 0; padding: 32px 36px 56px; background: var(--ps-canvas); overflow-y: auto; transition: padding-left 200ms ease; }
+@media (prefers-reduced-motion: reduce) {
+	.ps-main { transition: none; }
+}
 .ps-main > * { width: 100%; max-width: 1120px; margin-left: auto; margin-right: auto; }
 
 .ps-assistant-shell {
@@ -292,6 +334,30 @@ body {
 	border-top: 0;
 	border-right: 0;
 	border-bottom: 0;
+}
+
+/* The assistant's other entry point: the sidebar's own "Ask Localhost
+   Manager" button is unreachable while the sidebar is folded, so a floating
+   ghost bubble — the same 32px/24px control language as the collapse
+   toggle — stands in bottom-right whenever the panel is closed, at every
+   sidebar state. */
+.ps-assistant-fab.components-button {
+	position: fixed;
+	right: 16px;
+	bottom: 16px;
+	z-index: 19;
+	width: 32px;
+	min-width: 32px;
+	height: 32px;
+	padding: 0;
+	justify-content: center;
+	border-radius: 8px;
+	background: none;
+	color: var(--ps-muted);
+}
+.ps-assistant-fab.components-button:hover {
+	color: var(--ps-text);
+	background: var(--ps-hover);
 }
 
 .ps-section { max-width: 1120px; }
@@ -366,7 +432,7 @@ body {
    while the page heading, health chips, and retention note stay visible. */
 .ps-section--activity {
 	max-width: none;
-	height: calc(100vh - 76px);
+	height: calc(100vh - 60px);
 	display: flex;
 	flex-direction: column;
 	min-height: 0;
@@ -528,25 +594,12 @@ body {
 	}
 	.ps-sidebar__resize.wpds-ai-chat__resize-handle,
 	.ps-assistant__resize.wpds-ai-chat__resize-handle { display: none; }
-	.ps-app.is-sidebar-collapsed .ps-sidebar__header { min-height: 72px; }
-	.ps-app.is-sidebar-collapsed .ps-brand { min-height: 71px; justify-content: flex-start; padding: 14px 48px 14px 16px; }
-	.ps-app.is-sidebar-collapsed .ps-brand__copy,
-	.ps-app.is-sidebar-collapsed .ps-sidebar__caption,
-	.ps-app.is-sidebar-collapsed .ps-nav__label,
-	.ps-app.is-sidebar-collapsed .ps-utility__label,
-	.ps-app.is-sidebar-collapsed .ps-tip,
-	.ps-app.is-sidebar-collapsed .ps-insights,
-	.ps-app.is-sidebar-collapsed .ps-local-profile span,
-	.ps-app.is-sidebar-collapsed .ps-appearance,
-	.ps-app.is-sidebar-collapsed .ps-app-meta { display: initial; }
-	.ps-app.is-sidebar-collapsed .ps-sidebar-collapse.components-button { top: 22px; left: auto; right: 12px; }
-	.ps-app.is-sidebar-collapsed .ps-sidebar__body { padding: 14px 12px 16px; }
-	.ps-app.is-sidebar-collapsed .ps-nav button,
-	.ps-app.is-sidebar-collapsed .ps-sidebar__utilities .components-button { justify-content: flex-start; padding-left: 10px; padding-right: 10px; }
-	.ps-app.is-sidebar-collapsed .ps-local-profile { justify-content: flex-start; }
+	/* Below the drawer breakpoint the sidebar is a full takeover, not a
+	   column, so a persisted desktop "collapsed" preference must not fold
+	   it: the escaped-toggle and content-indent rules above are gated to
+	   desktop widths and never fire here. */
 	.ps-mobile-menu.components-button { display: inline-flex; flex: 0 0 auto; }
 	.ps-mobile-menu.components-button { color: var(--ps-text); background: var(--ps-subtle); }
-	.ps-main-column { grid-template-rows: 64px minmax(0, 1fr); }
 	.ps-topbar { padding: 0 12px; gap: 10px; }
 	.ps-topbar__title { flex: 1; }
 	.ps-topbar__title h1 { font-size: 17px; }
@@ -563,7 +616,7 @@ body {
 	.ps-subhead-row { align-items: flex-start; flex-direction: column; }
 	.ps-section__actions,
 	.ps-subhead-actions { flex-wrap: wrap; }
-	.ps-section--activity { height: auto; min-height: calc(100vh - 104px); }
+	.ps-section--activity { height: auto; min-height: calc(100vh - 96px); }
 	.ps-section--activity .ps-log { min-height: 50vh; }
 	.ps-assistant-shell { inset: 0; width: 100%; max-width: none; min-width: 0; border-left: 0; }
 	.ps-assistant { width: 100%; }
